@@ -51,6 +51,12 @@ servers:
 security:
   - ApiKeyAuth: []
 
+tags:
+  - name: Analysis
+    description: Match analysis workflow triggers
+  - name: Player Stats
+    description: Player statistics and match history
+
 paths:
   # ============================================================================
   # Stats API Endpoints
@@ -58,6 +64,8 @@ paths:
 
   /player/{steam_id}:
     get:
+      tags:
+        - Player Stats
       summary: Get player profile
       description: |
         Returns the player profile including aggregated statistics and recent matches.
@@ -138,6 +146,8 @@ paths:
 
   /player/{steam_id}/matches:
     get:
+      tags:
+        - Player Stats
       summary: Get player match history
       description: |
         Returns paginated list of analyzed matches for a player.
@@ -228,6 +238,8 @@ paths:
 
   /player/{steam_id}/pga/{match_id}:
     get:
+      tags:
+        - Player Stats
       summary: Get PGA match analysis
       description: |
         Returns detailed PGA (Post-Game Analysis) for a specific match.
@@ -634,6 +646,8 @@ paths:
 
   /analyze:
     post:
+      tags:
+        - Analysis
       summary: Trigger single match analysis
       description: |
         Triggers analysis for a single match.
@@ -709,6 +723,8 @@ paths:
 
   /analyze-bulk:
     post:
+      tags:
+        - Analysis
       summary: Trigger bulk analysis
       description: |
         Triggers analysis for multiple recent matches of a player.
@@ -803,6 +819,8 @@ paths:
 
   /status/{match_id}:
     get:
+      tags:
+        - Analysis
       summary: Check match analysis status
       description: |
         Returns the current status of a match analysis.
