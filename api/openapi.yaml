@@ -1,0 +1,1748 @@
+openapi: 3.0.3
+info:
+  title: Mentoroid API
+  description: |
+    Mentoroid Backend API for Dota 2 post-game analysis and player statistics.
+
+    ## Architecture
+
+    The API consists of two main services:
+    - **Stats API** (Cloud Function): Read-only, fast queries for player stats
+    - **Orchestrator** (Cloud Run): Write operations, triggers analysis workflows
+
+    ## Base URLs
+
+    | Environment | Stats API | Orchestrator |
+    |-------------|-----------|--------------|
+    | Dev | `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev` | `https://dev.mentoroid.ai` |
+    | Prod | `https://asia-southeast1-mentoroid-app.cloudfunctions.net/stats-api` | `https://api.mentoroid.ai` |
+
+    ## Authentication
+
+    All API endpoints require authentication via API key.
+
+    **Header:** `X-API-Key: <your_api_key>`
+
+    API keys are automatically generated when users sign up in the Mentoroid app.
+    See the [Firebase Functions documentation](/firebase/README.md) for details.
+
+    ### Rate Limits
+
+    | Endpoint | Limit |
+    |----------|-------|
+    | `/analyze` | 10 requests/minute |
+    | `/analyze-bulk` | 2 requests/minute |
+    | `/status/*` | 60 requests/minute |
+    | Stats API (all) | 100 requests/minute |
+
+  version: 1.0.0
+  contact:
+    name: Mentoroid Team
+    email: dev@mentoroid.ai
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev
+    description: Stats API - Development
+  - url: https://dev.mentoroid.ai
+    description: Orchestrator - Development
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  # ============================================================================
+  # Stats API Endpoints
+  # ============================================================================
+
+  /player/{steam_id}:
+    get:
+      summary: Get player profile
+      description: |
+        Returns the player profile including aggregated statistics and recent matches.
+
+        The profile contains pre-computed stats from PGA (Post-Game Analysis) results
+        including Mentoroid scores, role distribution, and win rates.
+      operationId: getPlayerProfile
+      parameters:
+        - name: steam_id
+          in: path
+          required: true
+          description: Steam 64-bit ID (e.g., 76561198432333227)
+          schema:
+            type: string
+            pattern: '^[0-9]{17}$'
+            example: "76561198432333227"
+        - name: include_matches
+          in: query
+          description: Include recent matches in response
+          schema:
+            type: boolean
+            default: true
+        - name: match_limit
+          in: query
+          description: Number of recent matches to include (max 100)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Player profile found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerProfile'
+              example:
+                steam_id: "76561198432333227"
+                total_matches_analyzed: 47
+                total_matches_available: 47
+                last_updated: "2025-12-11T10:30:00Z"
+                stats:
+                  total_wins: 28
+                  total_losses: 19
+                  win_rate: 59.6
+                  average_mentoroid_score: 72
+                  most_played_role: "Position 4"
+                  role_distribution:
+                    "Position 4": 25
+                    "Position 5": 12
+                    "Carry": 10
+                recent_matches:
+                  - match_id: "8577546204"
+                    hero_name: "Pudge"
+                    hero_id: 14
+                    mentoroid_score: 75
+                    result: "Win"
+                    role: "Position 4"
+                    kills: 5
+                    deaths: 3
+                    assists: 22
+                    gpm: 312
+                    xpm: 445
+                    analyzed_at: "2025-12-11T10:30:00Z"
+        '400':
+          description: Invalid steam_id format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Player profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /player/{steam_id}/matches:
+    get:
+      summary: Get player match history
+      description: |
+        Returns paginated list of analyzed matches for a player.
+
+        Supports filtering by hero and role. Matches are sorted by analysis date (most recent first).
+
+        **Note:** Only returns matches that have been analyzed through PGA. Maximum 50 matches
+        are stored per player.
+      operationId: getPlayerMatches
+      parameters:
+        - name: steam_id
+          in: path
+          required: true
+          description: Steam 64-bit ID
+          schema:
+            type: string
+            pattern: '^[0-9]{17}$'
+            example: "76561198432333227"
+        - name: limit
+          in: query
+          description: Number of matches to return (max 100)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of matches to skip for pagination
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: hero_id
+          in: query
+          description: Filter by hero ID
+          schema:
+            type: integer
+            example: 14
+        - name: role
+          in: query
+          description: Filter by role (e.g., "Position 4", "Carry", "Mid")
+          schema:
+            type: string
+            enum:
+              - "Carry"
+              - "Mid"
+              - "Offlane"
+              - "Position 4"
+              - "Position 5"
+      responses:
+        '200':
+          description: Match list returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerMatchList'
+              example:
+                steam_id: "76561198432333227"
+                total: 47
+                limit: 20
+                offset: 0
+                matches:
+                  - match_id: "8577546204"
+                    hero_name: "Pudge"
+                    hero_id: 14
+                    mentoroid_score: 75
+                    result: "Win"
+                    role: "Position 4"
+                    kills: 5
+                    deaths: 3
+                    assists: 22
+                    gpm: 312
+                    xpm: 445
+                    analyzed_at: "2025-12-11T10:30:00Z"
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Player not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /player/{steam_id}/pga/{match_id}:
+    get:
+      summary: Get PGA match analysis
+      description: |
+        Returns detailed PGA (Post-Game Analysis) for a specific match.
+
+        Combines quantitative metrics from DEM replay file analysis with AI-generated
+        narrative insights. Includes:
+        - **Mentoroid Score**: Overall performance rating
+        - **Phase-wise breakdown**: Early (0-10min), Mid (10-30min), Late (30+min) scores
+        - **Role-specific metrics**: Position-based analysis (Carry, Mid, Offlane, Support)
+        - **Vision stats**: Observer/sentry wards, dewards, smoke usage
+        - **Economic efficiency**: GPM/XPM vs benchmarks, item timings
+        - **Combat stats**: Kill participation, teamfight involvement, damage output
+        - **AI Summary**: Natural language insights and improvement suggestions
+
+        **Note:** PGA analysis requires the match replay file (DEM) which may take
+        up to 60 minutes to become available after the match ends.
+      operationId: getPlayerPGAMatch
+      parameters:
+        - name: steam_id
+          in: path
+          required: true
+          description: Steam 64-bit ID
+          schema:
+            type: string
+            pattern: '^[0-9]{17}$'
+            example: "76561198047160218"
+        - name: match_id
+          in: path
+          required: true
+          description: Dota 2 match ID
+          schema:
+            type: string
+            example: "8576409405"
+      responses:
+        '200':
+          description: PGA match analysis found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PGAMatchAnalysis'
+              example:
+                general_match_info:
+                  match_id: 8576409405
+                  duration_seconds: 2213
+                  duration_display: "36:53"
+                  radiant_win: true
+                  radiant_score: 41
+                  dire_score: 35
+                  comparison_rank: "Immortal"
+                  benchmark_interval: "full"
+                  lobby_type: "ranked"
+                  game_mode: "all_draft"
+                  combined_score: 48.37
+                  team_wise_score:
+                    Radiant: 29.46
+                    Dire: 18.91
+                hero_specific_info:
+                  steam_id: 76561198047160218
+                  match_id: 8576409405
+                  hero: "Nyx Assassin"
+                  hero_id: 88
+                  facet_id: 2
+                  facet_name: "Scuttle"
+                  position: "Offlane Support"
+                  actual_position: "soft_support"
+                  result: "Won"
+                  player_team: "Radiant"
+                  player_kills: 10
+                  player_deaths: 9
+                  player_assists: 21
+                  KDA: 3.44
+                  mentoroid_score: 6.17
+                  mentoroid_score_0_10: 5.52
+                  mentoroid_score_10_30: 5.21
+                  mentoroid_score_30_plus: 6.16
+                  bps_score: 6.04
+                  das_score: 6.31
+                  GPM: 461
+                  XPM: 635
+                  net_worth: 16046
+                  total_lh: 63
+                  total_dh: 2
+                  total_xp: 23458
+                  GPM_efficiency: 1.27
+                  XPM_efficiency: 1.09
+                  gold_efficiency: 1.36
+                  xp_efficiency: 1.14
+                  lh_efficiency: 1.38
+                  kill_participation: 75.61
+                  death_participation: 25.0
+                  teamfight_participation: 0.756
+                  game_score_contribution: 12.76
+                  team_score_contribution: 20.94
+                  lane_result: "lost"
+                  kills_at_10: 2
+                  deaths_at_10: 4
+                  assists_at_10: 1
+                  last_hits_at_10: 4
+                  denies_at_10: 0
+                  gold_difference_at_10: -357
+                  net_worth_difference_at_10: -573
+                  total_obs_placed: 2
+                  total_sen_placed: 5
+                  total_camps_stacked: 2
+                  watchers_captured: 9
+                  hero_damage: 27224
+                  tower_damage: 643
+                  hero_healing: 0
+                  damage_output_efficiency_score: 4.52
+                  objective_score: 0.187
+                  start_time: 1764091541
+                  end_time: 1764094146
+                detection_vision:
+                  total_obs_placed: 2
+                  total_sen_placed: 5
+                  obs_dewarded: 2
+                  smoke_usage: 2
+                  dust_purchased: 0
+                  gem_purchased: 0
+                session_screen:
+                  kills:
+                    raw: 10
+                    benchmark: 7.0
+                  deaths:
+                    raw: 9
+                    benchmark: 10.0
+                  assists:
+                    raw: 21
+                    benchmark: 17.0
+                  kill_participation:
+                    raw: 75.61
+                    benchmark: 19.05
+                  net_worth:
+                    raw: 16046
+                    benchmark: 13058.0
+                  xpm:
+                    raw: 635
+                    benchmark: 623.0
+                  observer_wards_placed:
+                    raw: 2
+                    benchmark: 4.0
+                  sentry_wards_placed:
+                    raw: 5
+                    benchmark: 8.0
+                graph_info:
+                  gold: [0, 169, 511, 859, 1034, 1159, 1249, 1339, 1429, 1553]
+                  xp: [0, 45, 247, 716, 812, 869, 1012, 1214, 1638, 1879]
+                  net_worth: [550, 689, 981, 1269, 1412, 1537, 1527, 1617, 1657, 1731]
+                phase_wise_stats:
+                  0-10_min:
+                    kills_at_10: 2
+                    deaths_at_10: 4
+                    assists_at_10: 1
+                    lane_result: "lost"
+                    obs_placed_0_10: 1
+                    sen_placed_0_10: 4
+                    camps_stacked_0_10: 0
+                    hero_damage_0_10: 2286
+                    smoke_used_0_10: 0
+                    dewarded_0_10: 0
+                    wisdom_runes_secured:
+                      count: 1
+                      times: [423]
+                  10-30_min:
+                    kill_participation: 64.0
+                    teamfight_participation: 80.0
+                    assists_10_30: 11
+                    deaths_10_30: 4
+                    obs_placed_10_30: 1
+                    sen_placed_10_30: 1
+                    smoke_used_10_30: 2
+                    dewarded_10_30: 1
+                    wisdom_runes_secured:
+                      count: 1
+                      times: [1747]
+                  30+_min:
+                    kill_participation: 92.31
+                    teamfight_participation: 100.0
+                    obs_placed_30_plus: 0
+                    sen_placed_30_plus: 0
+                    dewarded_30_plus: 1
+                    buyback_readiness:
+                      total_deaths: 0
+                      had_buyback_count: 0
+                      not_had_buyback_count: 0
+                      used_buyback: 0
+                    wisdom_runes_secured:
+                      count: 1
+                      times: [2111]
+                key_items_timing:
+                  Arcane Boots:
+                    id: 180
+                    img_name: "arcane_boots_png.png"
+                    time: 279
+                  Dagon:
+                    id: 104
+                    img_name: "dagon_png.png"
+                    time: 1037
+                  Eul's Scepter of Divinity:
+                    id: 100
+                    img_name: "cyclone_png.png"
+                    time: 1378
+                  Blink Dagger:
+                    id: 1
+                    img_name: "blink_png.png"
+                    time: 1673
+                  Wind Waker:
+                    id: 610
+                    img_name: "wind_waker_png.png"
+                    time: 2050
+                level_progress:
+                  "6": "11:00"
+                  "12": "21:00"
+                  "18": "33:00"
+                  "20": "38:00"
+                role_wise_metrics:
+                  gank_participation: 75.61
+                  tempo_setting_score: 0.756
+                  vision_contribution:
+                    total_obs_placed: 2
+                    total_sen_placed: 5
+                  roaming_impact:
+                    kills: 10
+                    assists: 21
+                    kill_participation: 75.61
+                universal_metrics:
+                  combat_effectiveness:
+                    damage_output_efficiency: 4.52
+                  economic_efficiency:
+                    gpm_efficiency: 1.27
+                    xpm_efficiency: 1.09
+                  strategic_decision_making: 0.187
+                summary:
+                  general:
+                    narrative: "With a Mentoroid score of 6.17/10, your overall performance as Nyx Assassin was strong despite losing the lane early. Your gold and XP efficiency were above average, and you contributed significantly to teamfights with 75.6% kill participation."
+                    metrics:
+                      combat_effectiveness:
+                        score: 4.52
+                        rating: "Very Good"
+                        description: "Outstanding damage output relative to gold invested"
+                      economic_efficiency:
+                        score: 1.25
+                        rating: "Good"
+                        description: "Strong economic performance above benchmark levels"
+                      strategic_decision_making:
+                        score: 0.19
+                        rating: "Underperformed"
+                        description: "Minimal involvement in objective-taking"
+                  role_specific:
+                    narrative: "As an offlane support, your high gank participation (75.6%) and tempo setting showcased your ability to create map pressure. Consider placing more observer wards (only 2 placed) to maintain better vision control."
+                    role_type: "support"
+                    mentoroid_score: 6.17
+                    kill_participation: 75.6
+                    gank_participation: 75.6
+                    tempo_setting: 75.6
+                    vision:
+                      observer_wards: 2
+                      sentry_wards: 5
+                  phase_wise:
+                    early_game:
+                      narrative: "Despite losing your lane with a 2/4/1 K/D/A, your early Mentoroid score of 5.52 indicates you were able to recover well."
+                      key_stats:
+                        kills: 2
+                        deaths: 4
+                        assists: 1
+                        lane_result: "lost"
+                        mentoroid_score: 5.52
+                      performance_trend: "stable"
+                    mid_game:
+                      narrative: "Your Mentoroid score dipped slightly to 5.21 during the mid-game, but you maintained high kill participation (64%) and teamfight involvement (80%)."
+                      key_stats:
+                        kill_participation: 64.0
+                        teamfight_participation: 80.0
+                        mentoroid_score: 5.21
+                      performance_trend: "stable"
+                    late_game:
+                      narrative: "As the game progressed, your Mentoroid score improved to 6.16, and you participated in 92.3% of kills and 100% of teamfights."
+                      key_stats:
+                        kill_participation: 92.3
+                        teamfight_participation: 100.0
+                        mentoroid_score: 6.16
+                      performance_trend: "improving"
+                total_hero_healing_done: 0
+        '400':
+          description: Invalid steam_id or match_id format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No PGA data found for match
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /stats/pga:
+    get:
+      summary: Get PGA analysis stats (legacy)
+      description: |
+        Returns PGA (Post-Game Analysis) statistics for a player.
+
+        **Deprecated:** Use `/player/{steam_id}` instead for new integrations.
+
+        This endpoint reads from the pre-computed state in GCS and supports
+        partial data (Steam-only when PGA is pending).
+      operationId: getPlayerPGAStats
+      parameters:
+        - name: player_id
+          in: query
+          required: true
+          description: Steam 64-bit ID
+          schema:
+            type: string
+            example: "76561198432333227"
+        - name: include_history
+          in: query
+          description: Include match history
+          schema:
+            type: boolean
+            default: true
+        - name: history_limit
+          in: query
+          description: Number of history records to include
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: PGA stats found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PGAStats'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No data found for player
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /stats/steam:
+    get:
+      summary: Get Steam API stats
+      description: |
+        Returns basic match statistics from Steam Web API.
+
+        This is the "fast path" data that's available immediately after a match,
+        without requiring replay file analysis.
+      operationId: getPlayerSteamStats
+      parameters:
+        - name: player_id
+          in: query
+          required: true
+          description: Steam 64-bit ID
+          schema:
+            type: string
+            example: "76561198432333227"
+        - name: include_history
+          in: query
+          description: Include match history
+          schema:
+            type: boolean
+            default: true
+        - name: history_limit
+          in: query
+          description: Number of history records to include
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Steam stats found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SteamStats'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No data found for player
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================================
+  # Orchestrator Endpoints
+  # ============================================================================
+
+  /analyze:
+    post:
+      summary: Trigger single match analysis
+      description: |
+        Triggers analysis for a single match.
+
+        This starts two parallel paths:
+        1. **Fast path**: Fetches basic stats from Steam API (~30 seconds)
+        2. **Deep path**: Waits for replay file and runs PGA (~15 minutes)
+
+        The response is immediate - analysis happens asynchronously.
+      operationId: analyzeMatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - match_id
+                - steam_id
+              properties:
+                match_id:
+                  type: string
+                  description: Dota 2 match ID
+                  example: "8565356977"
+                steam_id:
+                  type: string
+                  description: Steam 64-bit ID of the player to analyze
+                  example: "76561198432333227"
+                callback_url:
+                  type: string
+                  format: uri
+                  description: |
+                    HTTPS URL to receive webhook notification when analysis completes.
+                    Must be HTTPS. Private IP ranges (10.x, 192.168.x, localhost) are blocked.
+                  example: "https://your-server.com/webhook"
+                callback_secret:
+                  type: string
+                  description: |
+                    Secret key for HMAC-SHA256 signature verification.
+                    The webhook payload will be signed with this secret.
+                    Signature sent in X-Mentoroid-Signature header as "sha256=<hex>".
+                  example: "your-secret-for-hmac"
+      responses:
+        '200':
+          description: Analysis started (or match already analyzed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResponse'
+              examples:
+                without_callback:
+                  summary: Basic analysis request
+                  value:
+                    status: "started"
+                    match_id: "8565356977"
+                    steam_id: "76561198432333227"
+                    message: "Analysis started for match 8565356977"
+                with_callback:
+                  summary: Analysis with webhook callback
+                  value:
+                    status: "started"
+                    match_id: "8565356977"
+                    steam_id: "76561198432333227"
+                    request_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    callback_url: "https://your-server.com/webhook"
+                    message: "Analysis started. You will receive a webhook at https://your-server.com/webhook"
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /analyze-bulk:
+    post:
+      summary: Trigger bulk analysis
+      description: |
+        Triggers analysis for multiple recent matches of a player.
+
+        Fetches the player's match history from Steam API, deduplicates against
+        already-analyzed matches, and queues new matches for analysis.
+
+        Use `/bulk-status/{request_id}` to check progress.
+      operationId: analyzeBulk
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - steam_id
+              properties:
+                steam_id:
+                  type: string
+                  description: Steam 64-bit ID
+                  example: "76561198432333227"
+                match_count:
+                  type: integer
+                  description: Number of recent matches to analyze
+                  minimum: 1
+                  maximum: 200
+                  default: 50
+                callback_url:
+                  type: string
+                  format: uri
+                  description: |
+                    HTTPS URL to receive webhook notification when ALL matches complete.
+                    Must be HTTPS. Private IP ranges (10.x, 192.168.x, localhost) are blocked.
+                  example: "https://your-server.com/webhook"
+                callback_secret:
+                  type: string
+                  description: |
+                    Secret key for HMAC-SHA256 signature verification.
+                  example: "your-secret-for-hmac"
+      responses:
+        '200':
+          description: Bulk analysis started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkAnalysisResponse'
+              example:
+                status: "started"
+                request_id: "bulk_76561198432333227_1702459800"
+                steam_id: "76561198432333227"
+                total_requested: 50
+                already_analyzed: 15
+                queued_for_analysis: 35
+                message: "Queued 35 new matches for analysis"
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /bulk-status/{request_id}:
+    get:
+      summary: Check bulk analysis status
+      description: |
+        Returns the current status of a bulk analysis request.
+
+        Shows how many matches have been analyzed vs pending.
+      operationId: getBulkStatus
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          description: Bulk request ID from /analyze-bulk response
+          schema:
+            type: string
+            example: "bulk_76561198432333227_1702459800"
+      responses:
+        '200':
+          description: Status returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkStatus'
+        '404':
+          description: Request not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /status/{match_id}:
+    get:
+      summary: Check match analysis status
+      description: |
+        Returns the current status of a match analysis.
+
+        Useful for polling after calling `/analyze`.
+      operationId: getMatchStatus
+      parameters:
+        - name: match_id
+          in: path
+          required: true
+          description: Dota 2 match ID
+          schema:
+            type: string
+            example: "8565356977"
+        - name: steam_id
+          in: query
+          required: true
+          description: Steam 64-bit ID of the player
+          schema:
+            type: string
+            example: "76561198432333227"
+      responses:
+        '200':
+          description: Status returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchStatus'
+
+  /health:
+    get:
+      summary: Health check
+      description: Returns service health status
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  environment:
+                    type: string
+                    example: "dev"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key for authentication. Keys are automatically generated when users
+        sign up via the Mentoroid app and stored in Firebase Firestore.
+
+        Format: `mk_<32 hex characters>`
+
+        Example: `mk_a1b2c3d4e5f6789012345678901234ab`
+
+  schemas:
+    PlayerProfile:
+      type: object
+      properties:
+        steam_id:
+          type: string
+          description: Steam 64-bit ID
+        total_matches_analyzed:
+          type: integer
+          description: Number of matches with PGA analysis
+        total_matches_available:
+          type: integer
+          description: Total matches stored in profile
+        last_updated:
+          type: string
+          format: date-time
+          nullable: true
+        stats:
+          $ref: '#/components/schemas/ProfileStats'
+        recent_matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchSummary'
+
+    ProfileStats:
+      type: object
+      properties:
+        total_wins:
+          type: integer
+        total_losses:
+          type: integer
+        win_rate:
+          type: number
+          format: float
+        average_mentoroid_score:
+          type: number
+          format: float
+        most_played_role:
+          type: string
+        role_distribution:
+          type: object
+          additionalProperties:
+            type: integer
+
+    MatchSummary:
+      type: object
+      properties:
+        match_id:
+          type: string
+        hero_id:
+          type: integer
+        hero_name:
+          type: string
+        mentoroid_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Overall performance score (0-100)
+        result:
+          type: string
+          enum: ["Win", "Loss"]
+        role:
+          type: string
+          description: Detected role (Carry, Mid, Offlane, Position 4, Position 5)
+        kills:
+          type: integer
+        deaths:
+          type: integer
+        assists:
+          type: integer
+        gpm:
+          type: integer
+          description: Gold per minute
+        xpm:
+          type: integer
+          description: Experience per minute
+        analyzed_at:
+          type: string
+          format: date-time
+
+    PlayerMatchList:
+      type: object
+      properties:
+        steam_id:
+          type: string
+        total:
+          type: integer
+          description: Total matches matching filter
+        limit:
+          type: integer
+        offset:
+          type: integer
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchSummary'
+
+    PGAStats:
+      type: object
+      properties:
+        player_id:
+          type: string
+        total_matches:
+          type: integer
+        last_updated:
+          type: string
+          format: date-time
+        data_status:
+          type: object
+          properties:
+            complete:
+              type: boolean
+            partial:
+              type: boolean
+            matches_with_pga:
+              type: integer
+            matches_steam_only:
+              type: integer
+            pending_pga_analysis:
+              type: integer
+        most_played_role:
+          type: string
+        average_mentoroid_score:
+          type: number
+        role_distribution:
+          type: object
+          additionalProperties:
+            type: integer
+        aggregated_stats:
+          type: object
+          properties:
+            total_kills:
+              type: integer
+            total_deaths:
+              type: integer
+            total_assists:
+              type: integer
+            total_wins:
+              type: integer
+            total_losses:
+              type: integer
+            average_kda:
+              type: string
+            average_gpm:
+              type: number
+            average_xpm:
+              type: number
+            win_rate:
+              type: string
+        matches:
+          type: array
+          items:
+            type: object
+
+    SteamStats:
+      type: object
+      properties:
+        account_id:
+          type: string
+        total_matches:
+          type: integer
+        win_rate:
+          type: string
+        wins:
+          type: integer
+        losses:
+          type: integer
+        average_kda:
+          type: string
+        average_gpm:
+          type: number
+        average_xpm:
+          type: number
+        most_played_hero:
+          type: object
+        last_updated:
+          type: string
+          format: date-time
+        match_history:
+          type: array
+          items:
+            type: object
+
+    AnalysisResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: ["started", "already_analyzed", "error"]
+        match_id:
+          type: string
+        steam_id:
+          type: string
+        request_id:
+          type: string
+          description: Unique request ID (only present when callback_url provided)
+        callback_url:
+          type: string
+          description: Echo of the callback URL (only present when provided)
+        message:
+          type: string
+
+    WebhookPayload:
+      type: object
+      description: |
+        Payload sent to callback_url when analysis completes.
+
+        **Headers:**
+        - `X-Mentoroid-Signature`: HMAC-SHA256 signature as "sha256=<hex>"
+        - `X-Mentoroid-Request-Id`: The request_id from the original /analyze call
+        - `Content-Type`: application/json
+      properties:
+        event:
+          type: string
+          enum: ["analysis.complete"]
+        request_id:
+          type: string
+          format: uuid
+        match_id:
+          type: string
+        steam_id:
+          type: string
+        status:
+          type: string
+          enum: ["success", "failed"]
+        result:
+          type: object
+          nullable: true
+          description: Present when status is "success"
+          properties:
+            mentoroid_score:
+              type: number
+              minimum: 0
+              maximum: 100
+            role:
+              type: string
+            hero:
+              type: string
+        error:
+          type: string
+          nullable: true
+          description: Present when status is "failed"
+        timestamp:
+          type: string
+          format: date-time
+      example:
+        event: "analysis.complete"
+        request_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        match_id: "8565356977"
+        steam_id: "76561198432333227"
+        status: "success"
+        result:
+          mentoroid_score: 72
+          role: "carry"
+          hero: "Anti-Mage"
+        timestamp: "2025-12-26T10:30:00Z"
+
+    BulkAnalysisResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        request_id:
+          type: string
+        steam_id:
+          type: string
+        total_requested:
+          type: integer
+        already_analyzed:
+          type: integer
+        queued_for_analysis:
+          type: integer
+        message:
+          type: string
+
+    BulkStatus:
+      type: object
+      properties:
+        request_id:
+          type: string
+        steam_id:
+          type: string
+        status:
+          type: string
+          enum: ["pending", "in_progress", "completed", "failed"]
+        total_matches:
+          type: integer
+        completed_matches:
+          type: integer
+        failed_matches:
+          type: integer
+        progress_percent:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    MatchStatus:
+      type: object
+      properties:
+        match_id:
+          type: string
+        steam_id:
+          type: string
+        steam_data_status:
+          type: string
+          enum: ["pending", "available", "error"]
+        pga_status:
+          type: string
+          enum: ["pending", "analyzing", "completed", "error"]
+        report_available:
+          type: boolean
+        report_url:
+          type: string
+          nullable: true
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error type
+        message:
+          type: string
+          description: Human-readable error message
+
+    UnauthorizedError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Unauthorized"
+        message:
+          type: string
+          example: "Valid API key required. Include X-API-Key header."
+
+    RateLimitError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Rate limit exceeded"
+        message:
+          type: string
+          example: "Rate limit exceeded. Please try again later."
+        retry_after:
+          type: integer
+          description: Seconds until rate limit resets
+          example: 60
+
+    PGAMatchAnalysis:
+      type: object
+      description: |
+        Complete PGA (Post-Game Analysis) for a single match.
+
+        Contains detailed metrics extracted from the DEM replay file, compared against
+        rank-specific benchmarks, with AI-generated narrative insights.
+      properties:
+        general_match_info:
+          type: object
+          description: Match-level metadata and team scores
+          properties:
+            match_id:
+              type: integer
+              example: 8576409405
+            duration_seconds:
+              type: integer
+              example: 2213
+            duration_display:
+              type: string
+              example: "36:53"
+            radiant_win:
+              type: boolean
+            radiant_score:
+              type: integer
+              description: Radiant team kills
+            dire_score:
+              type: integer
+              description: Dire team kills
+            comparison_rank:
+              type: string
+              description: Rank used for benchmark comparison
+              example: "Immortal"
+            benchmark_interval:
+              type: string
+              example: "full"
+            lobby_type:
+              type: string
+              example: "ranked"
+            game_mode:
+              type: string
+              example: "all_draft"
+            combined_score:
+              type: number
+              description: Combined team Mentoroid score
+            team_wise_score:
+              type: object
+              description: Average Mentoroid score per team
+              properties:
+                Radiant:
+                  type: number
+                Dire:
+                  type: number
+
+        hero_specific_info:
+          type: object
+          description: Player's individual performance metrics
+          properties:
+            steam_id:
+              type: integer
+              format: int64
+            match_id:
+              type: integer
+            hero:
+              type: string
+              example: "Nyx Assassin"
+            hero_id:
+              type: integer
+              example: 88
+            facet_id:
+              type: integer
+              description: Hero facet selection
+            facet_name:
+              type: string
+            position:
+              type: string
+              description: Display name for position
+              example: "Offlane Support"
+            actual_position:
+              type: string
+              description: Internal position identifier
+              enum: ["carry", "mid", "offlane", "soft_support", "hard_support"]
+            result:
+              type: string
+              enum: ["Won", "Lost"]
+            player_team:
+              type: string
+              enum: ["Radiant", "Dire"]
+            player_kills:
+              type: integer
+            player_deaths:
+              type: integer
+            player_assists:
+              type: integer
+            KDA:
+              type: number
+              description: (Kills + Assists) / Deaths ratio
+
+            # Mentoroid Scores
+            mentoroid_score:
+              type: number
+              description: Overall Mentoroid score (0-10 scale)
+            mentoroid_score_0_10:
+              type: number
+              description: Early game score (0-10 min)
+            mentoroid_score_10_30:
+              type: number
+              description: Mid game score (10-30 min)
+            mentoroid_score_30_plus:
+              type: number
+              description: Late game score (30+ min)
+
+            # Component Scores
+            bps_score:
+              type: number
+              description: Basic Performance Score
+            das_score:
+              type: number
+              description: Damage/Action Score
+            bps_score_0_10:
+              type: number
+            bps_score_10_30:
+              type: number
+            bps_score_30_plus:
+              type: number
+            das_score_0_10:
+              type: number
+            das_score_10_30:
+              type: number
+            das_score_30_plus:
+              type: number
+
+            # Economic Stats
+            GPM:
+              type: integer
+              description: Gold per minute
+            XPM:
+              type: integer
+              description: Experience per minute
+            net_worth:
+              type: integer
+            total_lh:
+              type: integer
+              description: Total last hits
+            total_dh:
+              type: integer
+              description: Total denies
+            total_xp:
+              type: integer
+
+            # Efficiency Metrics (vs benchmark)
+            GPM_efficiency:
+              type: number
+              description: GPM compared to benchmark (1.0 = average)
+            XPM_efficiency:
+              type: number
+            gold_efficiency:
+              type: number
+            xp_efficiency:
+              type: number
+            lh_efficiency:
+              type: number
+            dn_efficiency:
+              type: number
+
+            # Participation Metrics
+            kill_participation:
+              type: number
+              description: Percentage of team kills involved in
+            death_participation:
+              type: number
+            teamfight_participation:
+              type: number
+            game_score_contribution:
+              type: number
+            team_score_contribution:
+              type: number
+
+            # Laning Phase
+            lane_result:
+              type: string
+              enum: ["won", "lost", "draw"]
+            kills_at_10:
+              type: integer
+            deaths_at_10:
+              type: integer
+            assists_at_10:
+              type: integer
+            last_hits_at_10:
+              type: integer
+            denies_at_10:
+              type: integer
+            gold_difference_at_10:
+              type: integer
+            net_worth_difference_at_10:
+              type: integer
+
+            # Vision & Utility
+            total_obs_placed:
+              type: integer
+            total_sen_placed:
+              type: integer
+            total_camps_stacked:
+              type: integer
+            watchers_captured:
+              type: integer
+
+            # Damage Stats
+            hero_damage:
+              type: integer
+            tower_damage:
+              type: integer
+            hero_healing:
+              type: integer
+            damage_output_efficiency_score:
+              type: number
+            objective_score:
+              type: number
+
+            # Timestamps
+            start_time:
+              type: integer
+              description: Unix timestamp of match start
+            end_time:
+              type: integer
+              description: Unix timestamp of match end
+
+        detection_vision:
+          type: object
+          description: Vision and detection item usage
+          properties:
+            total_obs_placed:
+              type: integer
+              description: Observer wards placed
+            total_sen_placed:
+              type: integer
+              description: Sentry wards placed
+            obs_dewarded:
+              type: integer
+              description: Enemy observer wards destroyed
+            smoke_usage:
+              type: integer
+              description: Smokes of Deceit used
+            dust_purchased:
+              type: integer
+            gem_purchased:
+              type: integer
+
+        session_screen:
+          type: object
+          description: |
+            Raw player values compared to rank-specific benchmarks.
+            Each stat has `raw` (player's actual value) and `benchmark` (average for rank).
+          additionalProperties:
+            type: object
+            properties:
+              raw:
+                type: number
+                description: Player's actual value
+              benchmark:
+                type: number
+                description: Average for comparison rank
+
+        graph_info:
+          type: object
+          description: Minute-by-minute time-series data for visualizations
+          properties:
+            gold:
+              type: array
+              description: Gold at each minute
+              items:
+                type: integer
+            xp:
+              type: array
+              description: XP at each minute
+              items:
+                type: integer
+            net_worth:
+              type: array
+              description: Net worth at each minute
+              items:
+                type: integer
+
+        phase_wise_stats:
+          type: object
+          description: Detailed statistics broken down by game phase
+          properties:
+            0-10_min:
+              type: object
+              description: Early game / laning phase
+              properties:
+                kills_at_10:
+                  type: integer
+                deaths_at_10:
+                  type: integer
+                assists_at_10:
+                  type: integer
+                lane_result:
+                  type: string
+                obs_placed_0_10:
+                  type: integer
+                sen_placed_0_10:
+                  type: integer
+                camps_stacked_0_10:
+                  type: integer
+                hero_damage_0_10:
+                  type: integer
+                smoke_used_0_10:
+                  type: integer
+                dewarded_0_10:
+                  type: integer
+                wisdom_runes_secured:
+                  type: object
+                  properties:
+                    count:
+                      type: integer
+                    times:
+                      type: array
+                      items:
+                        type: integer
+            10-30_min:
+              type: object
+              description: Mid game / teamfight phase
+              properties:
+                kill_participation:
+                  type: number
+                teamfight_participation:
+                  type: number
+                obs_placed_10_30:
+                  type: integer
+                sen_placed_10_30:
+                  type: integer
+                smoke_used_10_30:
+                  type: integer
+                dewarded_10_30:
+                  type: integer
+                wisdom_runes_secured:
+                  type: object
+            30+_min:
+              type: object
+              description: Late game
+              properties:
+                kill_participation:
+                  type: number
+                teamfight_participation:
+                  type: number
+                obs_placed_30_plus:
+                  type: integer
+                sen_placed_30_plus:
+                  type: integer
+                dewarded_30_plus:
+                  type: integer
+                buyback_readiness:
+                  type: object
+                  description: Buyback availability analysis
+                  properties:
+                    total_deaths:
+                      type: integer
+                    had_buyback_count:
+                      type: integer
+                    not_had_buyback_count:
+                      type: integer
+                    used_buyback:
+                      type: integer
+                wisdom_runes_secured:
+                  type: object
+
+        key_items_timing:
+          type: object
+          description: |
+            Key item purchase timings. Keys are item names, values contain timing and metadata.
+          additionalProperties:
+            type: object
+            properties:
+              time:
+                type: integer
+                description: Seconds into game when item was completed
+              id:
+                type: integer
+                description: Item ID
+              img_name:
+                type: string
+                description: Image filename for item icon
+
+        level_progress:
+          type: object
+          description: |
+            Level milestone timings. Keys are level numbers, values are "MM:SS" timestamps.
+          additionalProperties:
+            type: string
+          example:
+            "6": "11:00"
+            "12": "21:00"
+            "18": "33:00"
+
+        role_wise_metrics:
+          type: object
+          description: Role-specific performance metrics
+          properties:
+            gank_participation:
+              type: number
+              description: Percentage of ganks participated in
+            tempo_setting_score:
+              type: number
+              description: Impact on game tempo/pace
+            vision_contribution:
+              type: object
+              properties:
+                total_obs_placed:
+                  type: integer
+                total_sen_placed:
+                  type: integer
+            roaming_impact:
+              type: object
+              description: For roaming/ganking roles
+              properties:
+                kills:
+                  type: integer
+                assists:
+                  type: integer
+                kill_participation:
+                  type: number
+
+        universal_metrics:
+          type: object
+          description: Cross-role performance indicators
+          properties:
+            combat_effectiveness:
+              type: object
+              properties:
+                damage_output_efficiency:
+                  type: number
+                  description: Damage dealt relative to gold invested
+            economic_efficiency:
+              type: object
+              properties:
+                gpm_efficiency:
+                  type: number
+                xpm_efficiency:
+                  type: number
+            strategic_decision_making:
+              type: number
+              description: Objective-focused play score
+
+        summary:
+          type: object
+          description: AI-generated narrative insights and feedback
+          properties:
+            general:
+              type: object
+              description: Overall match summary
+              properties:
+                narrative:
+                  type: string
+                  description: Natural language summary of performance
+                metrics:
+                  type: object
+                  description: Key metrics with ratings
+                  additionalProperties:
+                    type: object
+                    properties:
+                      score:
+                        type: number
+                      rating:
+                        type: string
+                        enum: ["Excellent", "Very Good", "Good", "Average", "Underperformed", "Poor"]
+                      description:
+                        type: string
+            role_specific:
+              type: object
+              description: Role-based analysis
+              properties:
+                narrative:
+                  type: string
+                role_type:
+                  type: string
+                mentoroid_score:
+                  type: number
+                kill_participation:
+                  type: number
+                gank_participation:
+                  type: number
+                tempo_setting:
+                  type: number
+                vision:
+                  type: object
+                  properties:
+                    observer_wards:
+                      type: integer
+                    sentry_wards:
+                      type: integer
+            phase_wise:
+              type: object
+              description: Phase-by-phase narrative analysis
+              properties:
+                early_game:
+                  type: object
+                  properties:
+                    narrative:
+                      type: string
+                    key_stats:
+                      type: object
+                    performance_trend:
+                      type: string
+                      enum: ["improving", "stable", "declining"]
+                mid_game:
+                  type: object
+                  properties:
+                    narrative:
+                      type: string
+                    key_stats:
+                      type: object
+                    performance_trend:
+                      type: string
+                late_game:
+                  type: object
+                  properties:
+                    narrative:
+                      type: string
+                    key_stats:
+                      type: object
+                    performance_trend:
+                      type: string
+
+        total_hero_healing_done:
+          type: integer
+          description: Total healing done to allied heroes
