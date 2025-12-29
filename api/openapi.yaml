@@ -52,10 +52,10 @@ security:
   - ApiKeyAuth: []
 
 tags:
-  - name: Analysis
-    description: Match analysis workflow triggers
   - name: Player Stats
     description: Player statistics and match history
+  - name: Analysis
+    description: Match analysis workflow triggers
 
 paths:
   # ============================================================================
