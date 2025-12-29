@@ -538,6 +538,8 @@ paths:
 
   /stats/pga:
     get:
+      tags:
+        - Player Stats
       summary: Get PGA analysis stats (legacy)
       description: |
         Returns PGA (Post-Game Analysis) statistics for a player.
@@ -591,6 +593,8 @@ paths:
 
   /stats/steam:
     get:
+      tags:
+        - Player Stats
       summary: Get Steam API stats
       description: |
         Returns basic match statistics from Steam Web API.
@@ -789,6 +793,8 @@ paths:
 
   /bulk-status/{request_id}:
     get:
+      tags:
+        - Analysis
       summary: Check bulk analysis status
       description: |
         Returns the current status of a bulk analysis request.
@@ -852,6 +858,8 @@ paths:
 
   /health:
     get:
+      tags:
+        - Analysis
       summary: Health check
       description: Returns service health status
       operationId: healthCheck
