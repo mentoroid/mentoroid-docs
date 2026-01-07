@@ -27,7 +27,7 @@
       ]
     },
     "Post-Game": {
-      "description": "Post-game analysis (PGA) details",
+      "description": "Post-game analysis (PGA) details for a specific match",
       "endpoints": [
         {
           "path": "/player/{steam_id}/pga/{match_id}",
@@ -35,25 +35,17 @@
           "source": "api/openapi.yaml"
         }
       ]
-    },
-    "In-Game": {
-      "description": "In-game coaching APIs",
-      "endpoints": [
-        {
-          "path": "/start",
-          "method": "POST",
-          "source": "in-game/openapi.yaml"
-        },
-        {
-          "path": "/stop",
-          "method": "POST",
-          "source": "in-game/openapi.yaml"
-        }
-      ]
     }
   },
+  "_internal": {
+    "description": "Internal APIs - not synced to Notion",
+    "endpoints": [
+      "POST /start (in-game/openapi.yaml)",
+      "POST /stop (in-game/openapi.yaml)"
+    ]
+  },
   "_unmapped": {
-    "description": "Backend/internal endpoints not tied to a specific screen",
+    "description": "Backend/orchestration endpoints not tied to a specific screen",
     "endpoints": [
       "/analyze",
       "/analyze-bulk",
