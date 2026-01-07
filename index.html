@@ -112,7 +112,7 @@
 
     <div class="cards">
       <div class="card">
-        <h2><span class="icon">📡</span> REST API Reference</h2>
+        <h2><span class="icon">📡</span> Cloud API Reference</h2>
         <p>Complete API documentation with interactive examples. Explore endpoints for match analysis, player statistics, and more.</p>
         <ul class="features">
           <li>POST /analyze - Trigger match analysis</li>
@@ -120,7 +120,19 @@
           <li>GET /player/{steam_id} - Get player profile</li>
           <li>GET /stats/pga - Get PGA statistics</li>
         </ul>
-        <a href="./api/">View API Docs →</a>
+        <a href="./api/">View Cloud API →</a>
+      </div>
+
+      <div class="card">
+        <h2><span class="icon">🎮</span> In-Game Coaching API</h2>
+        <p>Local APIs for the real-time coaching daemon. Control the pipeline, manage TTS volume, and receive match events.</p>
+        <ul class="features">
+          <li>POST /start - Start coaching pipeline</li>
+          <li>POST /stop - Stop coaching pipeline</li>
+          <li>POST /match_started - Match begin webhook</li>
+          <li>POST /match_end - Match end with stats</li>
+        </ul>
+        <a href="./in-game/">View In-Game API →</a>
       </div>
 
       <div class="card">
