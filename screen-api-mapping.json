@@ -1,0 +1,67 @@
+{
+  "screens": {
+    "Performance Profile": {
+      "description": "Player profile and overall stats",
+      "endpoints": [
+        {
+          "path": "/player/{steam_id}",
+          "method": "GET",
+          "source": "api/openapi.yaml"
+        }
+      ]
+    },
+    "Match History": {
+      "description": "Player match history and game list",
+      "endpoints": [
+        {
+          "path": "/player/{steam_id}/matches",
+          "method": "GET",
+          "source": "api/openapi.yaml"
+        },
+        {
+          "path": "/player/{steam_id}/history",
+          "method": "GET",
+          "source": "api/openapi.yaml",
+          "status": "planned"
+        }
+      ]
+    },
+    "Post-Game": {
+      "description": "Post-game analysis (PGA) details",
+      "endpoints": [
+        {
+          "path": "/player/{steam_id}/pga/{match_id}",
+          "method": "GET",
+          "source": "api/openapi.yaml"
+        }
+      ]
+    },
+    "In-Game": {
+      "description": "In-game coaching APIs",
+      "endpoints": [
+        {
+          "path": "/start",
+          "method": "POST",
+          "source": "in-game/openapi.yaml"
+        },
+        {
+          "path": "/stop",
+          "method": "POST",
+          "source": "in-game/openapi.yaml"
+        }
+      ]
+    }
+  },
+  "_unmapped": {
+    "description": "Backend/internal endpoints not tied to a specific screen",
+    "endpoints": [
+      "/analyze",
+      "/analyze-bulk",
+      "/bulk-status/{request_id}",
+      "/status/{match_id}",
+      "/health",
+      "/stats/pga",
+      "/stats/steam"
+    ]
+  }
+}

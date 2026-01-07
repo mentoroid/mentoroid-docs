@@ -1,0 +1,41 @@
+name: Sync API Specs to Notion
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/openapi.yaml'
+      - 'in-game/openapi.yaml'
+      - 'steam/openapi.yaml'
+      - 'screen-api-mapping.json'
+  workflow_dispatch:
+
+jobs:
+  sync-notion:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install @notionhq/client js-yaml
+
+      - name: Sync to Notion
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+        run: node .github/scripts/sync-notion.js
+
+      - name: Summary
+        run: |
+          echo "## Notion Sync Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Screen API mappings synced to Notion Screen Specifications database." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Mapping file: \`screen-api-mapping.json\`" >> $GITHUB_STEP_SUMMARY
