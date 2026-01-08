@@ -1165,6 +1165,65 @@ components:
               type: number
               format: float
 
+    MatchDetail:
+      type: object
+      description: |
+        Full match details returned by the /matches endpoint.
+        Includes embedded PGA analysis data when available.
+      properties:
+        match_id:
+          type: string
+        hero_id:
+          type: integer
+        hero_name:
+          type: string
+        result:
+          type: string
+          enum: ["Win", "Loss"]
+        start_time:
+          type: integer
+          description: Unix timestamp of match start
+        kills:
+          type: integer
+        deaths:
+          type: integer
+        assists:
+          type: integer
+        gpm:
+          type: integer
+          description: Gold per minute
+        xpm:
+          type: integer
+          description: Experience per minute
+        net_worth:
+          type: integer
+          description: Final net worth
+        duration_seconds:
+          type: integer
+          description: Match duration in seconds
+        game_mode:
+          type: string
+          description: Game mode (e.g., all_draft, captains_mode)
+        lobby_type:
+          type: string
+          description: Lobby type (e.g., ranked, unranked)
+        coached:
+          type: boolean
+          description: Whether player was being coached
+        pga_data:
+          type: object
+          description: PGA analysis data (present when analysis is complete)
+          properties:
+            mentoroid_score:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: Overall performance score
+            role:
+              type: string
+              enum: [carry, mid, offlane, soft_support, hard_support]
+              description: Detected role
+
     PlayerMatchList:
       type: object
       description: |
@@ -1194,7 +1253,7 @@ components:
         matches:
           type: array
           items:
-            $ref: '#/components/schemas/MatchSummary'
+            $ref: '#/components/schemas/MatchDetail'
 
     PGAStats:
       type: object
