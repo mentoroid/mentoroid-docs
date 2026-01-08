@@ -21,8 +21,7 @@
         {
           "path": "/player/{steam_id}/history",
           "method": "GET",
-          "source": "api/openapi.yaml",
-          "status": "planned"
+          "source": "api/openapi.yaml"
         }
       ]
     },
