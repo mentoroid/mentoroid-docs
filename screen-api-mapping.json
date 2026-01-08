@@ -51,8 +51,13 @@
       "/bulk-status/{request_id}",
       "/status/{match_id}",
       "/health",
-      "/stats/pga",
       "/stats/steam"
+    ]
+  },
+  "_legacy": {
+    "description": "Deprecated endpoints - use newer alternatives",
+    "endpoints": [
+      "/stats/pga"
     ]
   }
 }

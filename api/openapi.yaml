@@ -57,6 +57,8 @@ tags:
     description: Player statistics and match history
   - name: Analysis
     description: Match analysis workflow triggers
+  - name: Legacy
+    description: Deprecated endpoints - use newer alternatives
 
 paths:
   # ============================================================================
@@ -641,7 +643,7 @@ paths:
   /stats/pga:
     get:
       tags:
-        - Player Stats
+        - Legacy
       summary: Get PGA analysis stats (legacy)
       description: |
         Returns PGA (Post-Game Analysis) statistics for a player.
@@ -696,7 +698,7 @@ paths:
   /stats/steam:
     get:
       tags:
-        - Player Stats
+        - Analysis
       summary: Get Steam API stats
       description: |
         Returns basic match statistics from Steam Web API.
