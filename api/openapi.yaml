@@ -905,12 +905,20 @@ paths:
         data is accessible. If data is private, analysis will fail.
 
         This endpoint wraps the Steam Web API internally - no Steam API key required from client.
+
+        **Response:** Returns only the status code from Steam API.
+
+        | Status | Meaning | Action |
+        |--------|---------|--------|
+        | `1` | PUBLIC | Player data is accessible - can analyze matches |
+        | `15` | PRIVATE | Player needs to enable "Expose Public Match Data" in Dota 2 settings |
+        | `0` | NO MATCHES | No match history found for this account |
       operationId: checkPublic
       parameters:
         - name: steam_id
           in: query
           required: true
-          description: Steam 64-bit ID
+          description: Steam 64-bit ID (17 digits)
           schema:
             type: string
             pattern: '^[0-9]{17}$'
@@ -921,27 +929,30 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PrivacyCheckResponse'
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    description: |
+                      Steam API status code:
+                      - `1` = PUBLIC (can analyze)
+                      - `15` = PRIVATE (cannot analyze)
+                      - `0` = No matches found
+                    enum: [0, 1, 15]
+                    example: 1
               examples:
                 public:
                   summary: Player data is PUBLIC
                   value:
-                    public: true
                     status: 1
-                    message: "Match data is PUBLIC"
-                    total_matches: 293
                 private:
                   summary: Player data is PRIVATE
                   value:
-                    public: false
                     status: 15
-                    message: "Match data is PRIVATE. Player needs to enable 'Expose Public Match Data' in Dota 2 settings."
                 no_matches:
                   summary: No matches found
                   value:
-                    public: null
                     status: 0
-                    message: "No matches found. This could be a new account."
         '400':
           description: Invalid steam_id format
           content:
@@ -949,8 +960,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                error: "Bad Request"
-                message: "Invalid steam_id format. Must be 17-digit Steam64 ID."
+                error: "Invalid steam_id format: abc123. Must be a 17-digit Steam64 ID."
+        '401':
+          description: Unauthorized - API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Valid API key required. Include X-API-Key header."
         '429':
           description: Rate limit exceeded
           content:
@@ -958,9 +976,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                error: "Rate limit exceeded"
-                message: "Too many requests. Try again later."
-                retry_after: 60
+                error: "Rate limit exceeded. Please slow down."
 
   /bulk-status/{request_id}:
     get:
@@ -1064,37 +1080,6 @@ components:
         Example: `mk_a1b2c3d4e5f6789012345678901234ab`
 
   schemas:
-    PrivacyCheckResponse:
-      type: object
-      properties:
-        public:
-          type: boolean
-          nullable: true
-          description: |
-            Privacy status of the player's match data.
-            - `true` - Match data is PUBLIC (can proceed with analysis)
-            - `false` - Match data is PRIVATE (analysis will fail)
-            - `null` - Could not determine (no matches found)
-          example: true
-        status:
-          type: integer
-          description: |
-            Raw status code from Steam API.
-            - `1` - PUBLIC
-            - `15` - PRIVATE
-            - `0` - No matches found
-          enum: [0, 1, 15]
-          example: 1
-        message:
-          type: string
-          description: Human-readable status message
-          example: "Match data is PUBLIC"
-        total_matches:
-          type: integer
-          nullable: true
-          description: Total matches available (only present when public is true)
-          example: 293
-
     PlayerProfile:
       type: object
       properties:
