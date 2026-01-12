@@ -1,0 +1,864 @@
+openapi: 3.0.3
+info:
+  title: Mentoroid Workflow & Pub/Sub Architecture
+  description: |
+    Complete documentation for the Mentoroid user data pipeline and Pub/Sub-based
+    asynchronous processing architecture.
+
+    ## Architecture Overview
+
+    The Mentoroid backend uses a Pub/Sub-driven architecture to process match analysis
+    asynchronously. This enables scalable, fault-tolerant processing of Dota 2 match data.
+
+    ```
+    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │                           EXTERNAL CONSUMERS                                     │
+    │         (Mobile App / Web Dashboard / Binary Desktop Client)                     │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+                                          │
+                        ┌─────────────────┴─────────────────┐
+                        │                                   │
+                        ▼                                   ▼
+              ┌─────────────────┐                ┌─────────────────┐
+              │   ORCHESTRATOR  │                │    STATS API    │
+              │   (Write API)   │                │   (Read API)    │
+              │   Port: 58081   │                │   Port: 58084   │
+              └────────┬────────┘                └─────────────────┘
+                       │                                   ▲
+                       │ Pub/Sub                           │ GCS Read
+                       ▼                                   │
+              ┌─────────────────┐                          │
+              │  PGA TRIGGER    │                          │
+              │   SERVICE       │                          │
+              └────────┬────────┘                          │
+                       │ HTTP / Pub/Sub                    │
+                       ▼                                   │
+              ┌─────────────────┐                          │
+              │ REPLAY FETCHER  │                          │
+              └────────┬────────┘                          │
+                       │ HTTP                              │
+                       ▼                                   │
+              ┌─────────────────┐                          │
+              │  PGA ANALYZER   │                          │
+              │   (10GB RAM)    │                          │
+              └────────┬────────┘                          │
+                       │ Pub/Sub                           │
+                       ▼                                   │
+              ┌─────────────────┐                          │
+              │   AGGREGATE     │──────────────────────────┘
+              │    SERVICE      │
+              └────────┬────────┘
+                       │ HTTP / Pub/Sub
+              ┌────────┴────────┐
+              ▼                 ▼
+    ┌─────────────────┐  ┌─────────────────┐
+    │    PROFILE      │  │   PGA LLM       │
+    │   GENERATOR     │  │   GENERATOR     │
+    └─────────────────┘  └─────────────────┘
+    ```
+
+    ## Two Processing Paths
+
+    | Path | Trigger | Use Case | Processing Mode |
+    |------|---------|----------|-----------------|
+    | **Path A** | `POST /signup` | First-time user registration | Bulk (14 days of matches) |
+    | **Path B** | `POST /match` | Live match from Binary client | Single (1 match) |
+
+    ## Pub/Sub Topics
+
+    | Topic | Publisher | Subscriber | Purpose |
+    |-------|-----------|------------|---------|
+    | `pga-trigger` | Orchestrator | PGA Trigger Service | Initiate PGA processing |
+    | `match-analysis-queue` | PGA Trigger | Replay Fetcher | Queue individual matches |
+    | `pga-results` | PGA Analyzer | Aggregate Service | Analysis completion |
+    | `pga-aggregation-complete` | Aggregate Service | Profile Generator | All matches done |
+
+    ## GCS Storage Structure
+
+    ```
+    gs://mentoroid-pga-dev/
+    ├── userdata/dota2/
+    │   ├── user_manifests/{steam_id}.json           # Master manifest
+    │   ├── user_manifests/{steam_id}_progress.json  # Bulk progress
+    │   ├── player_profiles/{steam_id}/
+    │   │   ├── profile_stats_webapi_pga.json        # Stats profile
+    │   │   └── profile_llm.json                     # AI insights
+    │   ├── player_pga/{steam_id}/
+    │   │   ├── output_pga/{match_id}.json           # PGA analysis
+    │   │   └── output_llm/{match_id}.json           # LLM summary
+    │   └── player_history/{steam_id}.json           # Aggregated history
+    └── system-data/
+        └── dem_cache/{match_id}.dem.bz2             # Cached replays
+    ```
+
+    ## Service Ports (Local Development)
+
+    | Service | Port | Purpose |
+    |---------|------|---------|
+    | Orchestrator | 58081 | Write API entry point |
+    | Replay Fetcher | 58082 | DEM file fetching |
+    | PGA Analyzer | 58083 | Deep match analysis |
+    | Stats API | 58084 | Read-only data access |
+    | PGA Trigger | 58085 | Queue management |
+    | Aggregate Service | 58086 | Manifest updates |
+    | Profile Generator | 58087 | Profile generation |
+    | PGA LLM Generator | 58088 | AI insights |
+    | GCS Emulator | 54443 | Cloud Storage |
+    | Pub/Sub Emulator | 58089 | Message queue |
+
+  version: 1.0.0
+  contact:
+    name: Mentoroid Team
+    email: dev@mentoroid.ai
+
+servers:
+  - url: http://localhost:58081
+    description: Orchestrator - Local Development
+  - url: https://dev.mentoroid.ai
+    description: Orchestrator - Development
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Path A - Signup
+    description: First-time user registration and bulk processing
+  - name: Path B - Match
+    description: Live match ingestion from Binary client
+  - name: Manifest
+    description: User manifest management
+  - name: Internal Services
+    description: Internal service endpoints (not for external use)
+  - name: Pub/Sub Messages
+    description: Pub/Sub message schemas and topics
+
+paths:
+  # ============================================================================
+  # Path A: Signup Flow
+  # ============================================================================
+
+  /signup:
+    post:
+      tags:
+        - Path A - Signup
+      summary: Register new user and process historical matches
+      description: |
+        **Path A Entry Point**: First-time user signup.
+
+        This endpoint:
+        1. Creates a new manifest for the user in GCS
+        2. Fetches last 14 days of matches from Steam API
+        3. Gets detailed match data (KDA, GPM, net_worth, hero_damage, etc.)
+        4. Publishes to `pga-trigger` topic for bulk PGA processing
+        5. Returns immediately while processing continues asynchronously
+
+        **Processing Flow:**
+        ```
+        POST /signup
+            │
+            ├─► Create manifest in GCS
+            │
+            ├─► Fetch matches from Steam API
+            │
+            ├─► Publish to pga-trigger topic
+            │       │
+            │       └─► PGA Trigger Service
+            │               │
+            │               └─► For each match → Replay Fetcher → PGA Analyzer
+            │
+            └─► Return response (processing continues async)
+        ```
+
+        **Note:** The user's profile and history will be available once all PGA
+        processing completes. Use `/user-manifest/{steam_id}` to check progress.
+      operationId: signup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - steam_id
+              properties:
+                steam_id:
+                  type: string
+                  pattern: '^7656[0-9]{13}$'
+                  description: Steam 64-bit ID (17 digits starting with 7656)
+                  example: "76561198047160218"
+            example:
+              steam_id: "76561198047160218"
+      responses:
+        '200':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignupResponse'
+              example:
+                status: "success"
+                message: "User registered, processing historical matches"
+                steam_id: "76561198047160218"
+                matches_found: 15
+                matches_added: 15
+        '400':
+          description: Invalid steam_id format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Invalid steam_id format"
+        '409':
+          description: User already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "User already registered"
+                steam_id: "76561198047160218"
+        '500':
+          description: Steam API key not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================================
+  # Path B: Match Flow
+  # ============================================================================
+
+  /match:
+    post:
+      tags:
+        - Path B - Match
+      summary: Receive live match data from Binary client
+      description: |
+        **Path B Entry Point**: Receive match data from the Binary desktop client.
+
+        This endpoint:
+        1. Validates the user exists (must call `/signup` first)
+        2. Adds match to user's manifest with Binary-provided stats
+        3. Publishes to `pga-trigger` topic for single match PGA processing
+        4. Returns immediately while processing continues asynchronously
+
+        **Binary Client Integration:**
+        The Binary client sends match data immediately after a game ends, including
+        real-time stats captured during gameplay.
+
+        **Processing Flow:**
+        ```
+        POST /match (from Binary)
+            │
+            ├─► Add to manifest in GCS
+            │
+            ├─► Publish to pga-trigger topic (request_type: "single")
+            │       │
+            │       └─► PGA Trigger Service
+            │               │
+            │               └─► Replay Fetcher → PGA Analyzer
+            │
+            └─► Return response
+        ```
+
+        **Note:** Profile will be regenerated after PGA completes.
+      operationId: receiveMatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BinaryMatchData'
+            example:
+              steam_id: "76561198047160218"
+              match_id: "8600000099"
+              hero_id: 74
+              hero_facet: 2
+              Facet_Selected: "Reflective Counter"
+              Win: "Won"
+              game_time: 2340.5
+              date: "2026-01-06"
+              networth: 32000
+              xpm: 750.5
+              lasthit: 320
+              denies: 18
+              death_participant: 0.15
+              sentry_ward: 2
+              observer_ward: 4
+              kill_participant: 0.72
+              kill: 15
+              death: 3
+              assist: 12
+      responses:
+        '200':
+          description: Match received and queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchResponse'
+              example:
+                status: "success"
+                message: "Match received and queued for processing"
+                match_id: "8600000099"
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Missing required fields"
+                missing:
+                  - hero_id
+                  - kill
+        '404':
+          description: User not registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "User not registered. Please call /signup first."
+                steam_id: "76561198047160218"
+
+  # ============================================================================
+  # Manifest Endpoints
+  # ============================================================================
+
+  /user-manifest/{steam_id}:
+    get:
+      tags:
+        - Manifest
+      summary: Get user's manifest
+      description: |
+        Returns the user's manifest containing all matches and their processing status.
+
+        Use this to check progress of PGA processing after signup.
+
+        **Match Status Values:**
+        - `pending`: Awaiting PGA processing
+        - `processing`: Currently being analyzed
+        - `success`: PGA complete, `pga_data` populated
+        - `failed`: PGA failed (check `failed` array for details)
+      operationId: getUserManifest
+      parameters:
+        - name: steam_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9]{17}$'
+          example: "76561198047160218"
+      responses:
+        '200':
+          description: Manifest found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserManifest'
+        '404':
+          description: Manifest not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /user-profile/{steam_id}:
+    get:
+      tags:
+        - Manifest
+      summary: Get user's generated profile
+      description: |
+        Returns the aggregated player profile including:
+        - Overview summary (wins, losses, win rate, streak)
+        - Mentoroid metrics (average score, trend)
+        - Role distribution with hero breakdown
+        - Most played heroes with detailed stats
+        - AI insights (if LLM processing complete)
+      operationId: getUserProfile
+      parameters:
+        - name: steam_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Profile found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerProfile'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /user-history/{steam_id}:
+    get:
+      tags:
+        - Manifest
+      summary: Get user's match history
+      description: |
+        Returns paginated match history with aggregated trends.
+      operationId: getUserHistory
+      parameters:
+        - name: steam_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: History found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerHistory'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================================
+  # Internal Service Endpoints (Documentation Only)
+  # ============================================================================
+
+  /internal/pga-trigger:
+    post:
+      tags:
+        - Internal Services
+      summary: "[Internal] PGA Trigger Service endpoint"
+      description: |
+        **Internal Service - Not for external use**
+
+        Receives Pub/Sub messages from `pga-trigger` topic.
+
+        **Port:** 58085 (local) | Cloud Function (production)
+
+        **Triggered by:** Pub/Sub push subscription
+
+        **Actions:**
+        - For bulk: Creates progress file, publishes each match to `match-analysis-queue`
+        - For single: Publishes match to `match-analysis-queue`
+
+        **Message Schema:**
+        ```json
+        {
+          "steam_id": "76561198047160218",
+          "request_type": "bulk",
+          "match_ids": ["8576409405", "8576409406"],
+          "timestamp": "2026-01-09T10:00:00Z"
+        }
+        ```
+      operationId: pgaTriggerInternal
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PgaTriggerMessage'
+      responses:
+        '200':
+          description: Message processed
+
+  /internal/aggregate:
+    post:
+      tags:
+        - Internal Services
+      summary: "[Internal] Aggregate Service endpoint"
+      description: |
+        **Internal Service - Not for external use**
+
+        Receives PGA results and updates user manifest.
+
+        **Port:** 58086 (local) | Cloud Function (production)
+
+        **Triggered by:**
+        - Pub/Sub push from `pga-results` topic
+        - Direct HTTP call from PGA Analyzer
+
+        **Actions:**
+        1. Updates manifest match entry (status: success, adds pga_data)
+        2. Updates progress file
+        3. Regenerates history aggregate
+        4. When all matches complete: publishes to `pga-aggregation-complete`
+      operationId: aggregateInternal
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PgaResultMessage'
+      responses:
+        '200':
+          description: Result processed
+
+  /internal/profile-generator:
+    post:
+      tags:
+        - Internal Services
+      summary: "[Internal] Profile Generator endpoint"
+      description: |
+        **Internal Service - Not for external use**
+
+        Generates player profile from manifest data.
+
+        **Port:** 58087 (local) | Cloud Function (production)
+
+        **Triggered by:**
+        - Pub/Sub push from `pga-aggregation-complete` topic
+        - Direct HTTP call from Aggregate Service
+
+        **Actions:**
+        1. Reads manifest from GCS
+        2. Aggregates statistics
+        3. Calls LLM for AI insights (optional)
+        4. Writes profile to GCS
+      operationId: profileGeneratorInternal
+      responses:
+        '200':
+          description: Profile generated
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+
+  schemas:
+    SignupResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+        message:
+          type: string
+        steam_id:
+          type: string
+        matches_found:
+          type: integer
+          description: Total matches found in last 14 days
+        matches_added:
+          type: integer
+          description: Matches successfully added to manifest
+
+    MatchResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+        message:
+          type: string
+        match_id:
+          type: string
+
+    BinaryMatchData:
+      type: object
+      required:
+        - steam_id
+        - match_id
+        - hero_id
+        - hero_facet
+        - Facet_Selected
+        - Win
+        - game_time
+        - date
+        - networth
+        - xpm
+        - lasthit
+        - denies
+        - death_participant
+        - sentry_ward
+        - observer_ward
+        - kill_participant
+        - kill
+        - death
+        - assist
+      properties:
+        steam_id:
+          type: string
+          description: Steam 64-bit ID
+        match_id:
+          type: string
+          description: Dota 2 match ID
+        hero_id:
+          type: integer
+          description: Hero ID
+        hero_facet:
+          type: integer
+          description: Hero facet selected
+        Facet_Selected:
+          type: string
+          description: Facet name
+        Win:
+          type: string
+          enum: [Won, Lost]
+        game_time:
+          type: number
+          description: Game duration in seconds
+        date:
+          type: string
+          format: date
+        networth:
+          type: integer
+          description: Final net worth
+        xpm:
+          type: number
+          description: XP per minute
+        lasthit:
+          type: integer
+          description: Total last hits
+        denies:
+          type: integer
+          description: Total denies
+        death_participant:
+          type: number
+          description: Death participation percentage
+        sentry_ward:
+          type: integer
+          description: Sentry wards placed
+        observer_ward:
+          type: integer
+          description: Observer wards placed
+        kill_participant:
+          type: number
+          description: Kill participation percentage
+        kill:
+          type: integer
+        death:
+          type: integer
+        assist:
+          type: integer
+
+    UserManifest:
+      type: object
+      properties:
+        steam_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_updated:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [signup, match]
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManifestMatch'
+        failed:
+          type: array
+          items:
+            type: object
+
+    ManifestMatch:
+      type: object
+      properties:
+        match_id:
+          type: string
+        start_time:
+          type: integer
+          description: Unix timestamp
+        status:
+          type: string
+          enum: [pending, processing, success, failed]
+        hero_id:
+          type: integer
+        hero_name:
+          type: string
+        result:
+          type: string
+          enum: [Won, Lost]
+        player_team:
+          type: string
+          enum: [Radiant, Dire]
+        kills:
+          type: integer
+        deaths:
+          type: integer
+        assists:
+          type: integer
+        gpm:
+          type: integer
+        xpm:
+          type: integer
+        net_worth:
+          type: integer
+        last_hits:
+          type: integer
+        denies:
+          type: integer
+        hero_damage:
+          type: integer
+        tower_damage:
+          type: integer
+        duration_seconds:
+          type: integer
+        game_mode:
+          type: string
+        lobby_type:
+          type: string
+        coached:
+          type: boolean
+        pga_data:
+          $ref: '#/components/schemas/PgaData'
+
+    PgaData:
+      type: object
+      description: PGA analysis results (populated after processing)
+      properties:
+        mentoroid_score:
+          type: number
+          description: Overall performance score (0-10)
+        role:
+          type: string
+          description: Detected role
+        lane_dominance_score:
+          type: number
+          description: Laning phase score (0-10)
+        teamfight_score:
+          type: number
+          description: Teamfight contribution score (0-10)
+        farm_efficiency:
+          type: number
+          description: Gold efficiency metric
+
+    PlayerProfile:
+      type: object
+      properties:
+        player_steam_id:
+          type: integer
+        player_name:
+          type: string
+        player_photo:
+          type: string
+          format: uri
+        rank_info:
+          type: integer
+        overview_summary:
+          type: object
+          properties:
+            total_matches_analyzed:
+              type: integer
+            total_wins:
+              type: integer
+            total_losses:
+              type: integer
+            win_rate_percentage:
+              type: number
+            avg_game_duration_formatted:
+              type: string
+            current_streak:
+              type: string
+            last_match_date:
+              type: integer
+        mentoroid_metrics:
+          type: object
+          properties:
+            avg_mentoroid_score:
+              type: number
+            last_mentoroid_score:
+              type: number
+            mentoroid_improvement_percentage:
+              type: string
+        faction_winrates:
+          type: object
+          properties:
+            radiant:
+              type: object
+            dire:
+              type: object
+        match_trends:
+          type: array
+          items:
+            type: object
+        most_played_heroes:
+          type: array
+          items:
+            type: object
+        role_distribution:
+          type: object
+
+    PlayerHistory:
+      type: object
+      properties:
+        steam_id:
+          type: string
+        generated_at:
+          type: string
+          format: date-time
+        total_matches:
+          type: integer
+        matches:
+          type: array
+          items:
+            type: object
+        pagination:
+          type: object
+
+    PgaTriggerMessage:
+      type: object
+      description: Pub/Sub message schema for pga-trigger topic
+      properties:
+        steam_id:
+          type: string
+        request_type:
+          type: string
+          enum: [bulk, single]
+        match_ids:
+          type: array
+          items:
+            type: string
+          description: For bulk requests
+        match_id:
+          type: string
+          description: For single requests
+        timestamp:
+          type: string
+          format: date-time
+
+    PgaResultMessage:
+      type: object
+      description: Pub/Sub message schema for pga-results topic
+      properties:
+        match_id:
+          type: string
+        steam_id:
+          type: string
+        status:
+          type: string
+          enum: [success, failed]
+        pga_data:
+          $ref: '#/components/schemas/PgaData'
+        timestamp:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
