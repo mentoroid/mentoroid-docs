@@ -1,571 +1,208 @@
 openapi: 3.0.3
 info:
   title: Mentoroid In-Game Coaching API
+  version: 2.0.0
   description: |
-    Local APIs for the Mentoroid Dota 2 in-game coaching daemon.
-
     ## Overview
-
-    The in-game coaching system consists of two local services:
-
     | Service | Port | Purpose |
     |---------|------|---------|
-    | **Coaching Backend** | 8000 | Controls the coaching pipeline (start/stop, volume) |
-    | **Match Events** | 8001 | Receives match lifecycle events (start/end) |
+    | Coaching Backend | 39144 | Pipeline control, player setup |
+    | GSI Handler | 19151 | Dota 2 Game State Integration |
+    | Match Events | 18100 | Flutter implements this server |
 
-    ## Architecture
+    ## Flutter Integration Flow
+    1. GET /ready - Check backend running
+    2. GET /player_info - Check if Steam ID set
+    3. POST /set_player - Set Steam ID
+    4. Done - auto-detection handles rest
 
+    ## Auto-Detection
+    Watcher auto-starts/stops pipeline when Dota 2 opens/closes.
+    No need to call /start or /stop manually.
+
+    ## Flutter Server (port 18100)
+    Flutter must implement POST /match_started and POST /match_end
+
+    ## GSI Setup (Windows)
+
+    ### Step 1: Create config folder
+    Navigate to your Dota 2 cfg folder and create the GSI folder:
     ```
-    ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-    │  Flutter App    │     │  Coaching       │     │  External       │
-    │  (Client)       │     │  Backend :8000  │     │  Receiver :8001 │
-    └────────┬────────┘     └────────┬────────┘     └────────┬────────┘
-             │                       │                       │
-             │  POST /start          │                       │
-             │──────────────────────>│                       │
-             │                       │                       │
-             │                       │  (Pipeline runs)      │
-             │                       │                       │
-             │                       │  POST /match_started  │
-             │                       │──────────────────────>│
-             │                       │                       │
-             │                       │  POST /match_end      │
-             │                       │──────────────────────>│
-             │                       │                       │
-             │  POST /stop           │                       │
-             │──────────────────────>│                       │
-    ```
-
-    ## Game State Flow
-
-    ```
-    HERO_SELECTION → STRATEGY_TIME → PRE_GAME → GAME_IN_PROGRESS → POST_GAME
-          │                                                            │
-          └── POST /match_started                     POST /match_end ─┘
+    C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta\game\dota\cfg\gamestate_integration\
     ```
 
-  version: 1.0.0
-  contact:
-    name: Mentoroid Team
-    email: dev@mentoroid.ai
+    ### Step 2: Create config file
+    Inside gamestate_integration folder, create `gamestate_integration_mentoroid.cfg`:
+    ```
+    "Dota 2 Integration Configuration"
+    {
+        "uri"          "http://localhost:19151/"
+        "timeout"      "5.0"
+        "buffer"       "0.1"
+        "throttle"     "0.1"
+        "heartbeat"    "10.0"
+        "data"
+        {
+            "auth"            "mentoroid_gsi"
+            "provider"        "1"
+            "map"             "1"
+            "player"          "1"
+            "hero"            "1"
+            "abilities"       "1"
+            "items"           "1"
+            "events"          "1"
+            "buildings"       "1"
+            "league"          "1"
+            "draft"           "1"
+            "wearables"       "1"
+            "minimap"         "1"
+            "roshan"          "1"
+            "couriers"        "1"
+            "neutralitems"    "1"
+        }
+    }
+    ```
+
+    ### Step 3: Enable in Dota 2
+    In Dota 2: Settings -> Social -> Enable "Share match data with third-party sources"
 
 servers:
-  - url: http://localhost:8000
-    description: Coaching Backend (Pipeline Control)
-  - url: http://localhost:8001
-    description: Match Events Receiver
+  - url: http://localhost:39144
+    description: Coaching Backend
+  - url: http://localhost:18100
+    description: Match Events (Flutter Server)
+  - url: http://localhost:19151
+    description: GSI Handler
 
 tags:
+  - name: Player Setup
+  - name: Status
   - name: Pipeline Control
-    description: Start/stop coaching and control TTS volume
-  - name: Match Events
-    description: Match lifecycle webhooks sent by the coaching daemon
+  - name: Match Events (Flutter Server)
 
 paths:
-  # ============================================================================
-  # Coaching Backend (Port 8000)
-  # ============================================================================
+  /set_player:
+    post:
+      tags: [Player Setup]
+      summary: Set Steam ID
+      requestBody:
+        content:
+          application/json:
+            example: {steam_id: "76561197960272226"}
+      responses:
+        "200":
+          content:
+            application/json:
+              example: {status: success, player_name: Wile}
+
+  /player_info:
+    get:
+      tags: [Player Setup]
+      summary: Get player info
+      responses:
+        "200":
+          content:
+            application/json:
+              example: {status: success, steam_id: "76561197960272226"}
+
+  /ready:
+    get:
+      tags: [Status]
+      summary: Check backend ready
+      responses:
+        "200":
+          content:
+            application/json:
+              example: {ready: true, running: false}
+
+  /watcher_status:
+    get:
+      tags: [Status]
+      summary: Get watcher status
+      responses:
+        "200":
+          content:
+            application/json:
+              example: {watcher_running: true, dota_detected: true}
 
   /start:
     post:
-      tags:
-        - Pipeline Control
-      summary: Start coaching pipeline
-      description: |
-        Starts the in-game coaching pipeline with player configuration.
-
-        The pipeline will:
-        1. Load YOLO model for hero detection
-        2. Connect to Dota 2 GSI (Game State Integration)
-        3. Begin monitoring for match start
-        4. Provide voice coaching during gameplay
-
-        **Note:** Only one pipeline can run at a time.
-      operationId: startPipeline
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/StartRequest'
-            example:
-              selected_roles: ["Carry"]
-              selected_heroes: []
-              guidance_options:
-                Hero Selection: true
-                Lane Awareness: false
-                Role Guide: true
-                Hero Guide: true
-                Post-Game Analysis: true
-              current_rank: "Herald"
-              prefered_hero_from_win_rate: [6, 8, 46, 94, 70]
+      tags: [Pipeline Control]
+      summary: Manual start (optional - watcher auto-starts)
       responses:
-        '200':
-          description: Pipeline status
+        "200":
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PipelineResponse'
-              examples:
-                started:
-                  summary: Pipeline started successfully
-                  value:
-                    status: "started"
-                already_running:
-                  summary: Pipeline already running
-                  value:
-                    status: "already_running"
-                error:
-                  summary: Error starting pipeline
-                  value:
-                    status: "error"
-                    message: "Failed to save selection data"
+              example: {status: started}
 
   /stop:
     post:
-      tags:
-        - Pipeline Control
-      summary: Stop coaching pipeline
-      description: |
-        Stops the running coaching pipeline.
-
-        This will:
-        - Stop GSI monitoring
-        - Clear TTS queue
-        - Reset pipeline state
-      operationId: stopPipeline
+      tags: [Pipeline Control]
+      summary: Manual stop (optional - watcher auto-stops)
       responses:
-        '200':
-          description: Pipeline status
+        "200":
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PipelineResponse'
-              examples:
-                stopped:
-                  summary: Pipeline stopped
-                  value:
-                    status: "stopped"
-                not_running:
-                  summary: Pipeline was not running
-                  value:
-                    status: "not_running"
+              example: {status: stopped}
 
   /volume_set:
     post:
-      tags:
-        - Pipeline Control
+      tags: [Pipeline Control]
       summary: Set TTS volume
-      description: |
-        Set the text-to-speech playback volume.
-
-        **Works in real-time** - affects currently playing audio and all future audio.
-        Can be called during an active game.
-      operationId: setVolume
       requestBody:
-        required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/VolumeRequest'
-            example:
-              volume: 75
+            example: {volume: 75}
       responses:
-        '200':
-          description: Volume status
+        "200":
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/VolumeResponse'
-              examples:
-                success:
-                  summary: Volume set successfully
-                  value:
-                    status: "success"
-                    volume: 75
-                    message: "Volume set to 75%"
-                invalid:
-                  summary: Invalid volume range
-                  value:
-                    status: "error"
-                    message: "Volume must be between 1 and 100"
-                not_initialized:
-                  summary: TTS not initialized
-                  value:
-                    status: "error"
-                    message: "TTS not initialized. Start pipeline first."
+              example: {status: success, volume: 75}
 
   /volume_get:
     get:
-      tags:
-        - Pipeline Control
+      tags: [Pipeline Control]
       summary: Get TTS volume
-      description: Returns the current TTS playback volume level.
-      operationId: getVolume
       responses:
-        '200':
-          description: Current volume
+        "200":
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/VolumeGetResponse'
-              examples:
-                success:
-                  summary: Volume retrieved
-                  value:
-                    status: "success"
-                    volume: 75
-                not_initialized:
-                  summary: TTS not initialized
-                  value:
-                    status: "error"
-                    message: "TTS not initialized"
-                    volume: null
-
-  # ============================================================================
-  # Match Events Receiver (Port 8001)
-  # ============================================================================
+              example: {status: success, volume: 75}
 
   /match_started:
     post:
-      tags:
-        - Match Events
-      summary: Match started webhook
-      description: |
-        Called by the coaching daemon when a new Dota 2 match begins.
-
-        Triggered when:
-        - GSI detects a new `match_id`
-        - Game state transitions to `DOTA_GAMERULES_STATE_HERO_SELECTION` or later
-      operationId: matchStarted
+      tags: [Match Events (Flutter Server)]
+      summary: Match started webhook (Flutter implements)
       requestBody:
-        required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/MatchStartedRequest'
-            example:
-              match_id: "8638730876"
+            example: {match_id: "8648059066"}
       responses:
-        '200':
-          description: Webhook received
+        "200":
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/WebhookResponse'
-              example:
-                status: "ok"
+              example: {status: ok}
 
   /match_end:
     post:
-      tags:
-        - Match Events
-      summary: Match ended webhook
-      description: |
-        Called by the coaching daemon when a Dota 2 match ends.
-
-        Triggered when game state transitions to `DOTA_GAMERULES_STATE_POST_GAME`.
-        Contains comprehensive player performance statistics collected during the match.
-
-        **Called only once per match.**
-      operationId: matchEnd
+      tags: [Match Events (Flutter Server)]
+      summary: Match ended webhook (Flutter implements)
       requestBody:
-        required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/MatchEndRequest'
             example:
-              match_id: "8638730876"
+              match_id: "8648059066"
               session_data:
                 hero_id: 35
-                hero_facet: 1
-                Facet_Selected: "Ghillie Suit"
-                Win: "Win"
-                role: "Hard Support"
-                game_time: 1209.0
-                date: "2026-01-07 10:36:18"
-                networth: 16512
-                xpm: 610.0
-                lasthit: 99
-                denies: 1
-                death_participant: 14.29
-                sentry_ward: 1
-                observer_ward: 2
-                kill_participant: 54.84
-                kill: 12
-                death: 2
-                assist: 5
+                Win: Win
+                role: Support
+                game_time: 553
+                networth: 20491
+                kill: 0
+                death: 0
+                assist: 0
       responses:
-        '200':
-          description: Webhook received
+        "200":
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/WebhookResponse'
-              example:
-                status: "ok"
-
-components:
-  schemas:
-    # ============================================================================
-    # Pipeline Control Schemas
-    # ============================================================================
-
-    StartRequest:
-      type: object
-      description: Configuration for starting the coaching pipeline
-      properties:
-        selected_roles:
-          type: array
-          description: Roles the player wants to play
-          items:
-            type: string
-            enum: ["Carry", "Mid", "Offlane", "Support", "Hard Support"]
-          default: []
-          example: ["Carry"]
-        selected_heroes:
-          type: array
-          description: |
-            **Must be sent as empty array `[]` for now.**
-            This field is reserved for future use - hero pre-selection functionality will be added later.
-          items:
-            type: integer
-            description: Dota 2 hero ID
-          default: []
-          example: []
-        guidance_options:
-          type: object
-          description: Feature toggles for coaching modules
-          additionalProperties:
-            type: boolean
-          example:
-            Hero Selection: true
-            Lane Awareness: false
-            Role Guide: true
-            Hero Guide: true
-            Item Selection: false
-            Item Usage: false
-            Post-Game Analysis: true
-        current_rank:
-          type: string
-          description: Player's current Dota 2 rank
-          enum: ["Herald", "Guardian", "Crusader", "Archon", "Legend", "Ancient", "Divine", "Immortal", "Unranked"]
-          default: "Unranked"
-          example: "Herald"
-        prefered_hero_from_win_rate:
-          type: array
-          description: |
-            Heroes with high win rate for this player (by hero ID).
-            These heroes will be prioritized in recommendations.
-          items:
-            type: integer
-            description: Dota 2 hero ID
-          default: []
-          example: [6, 8, 46, 94, 70]
-
-    PipelineResponse:
-      type: object
-      properties:
-        status:
-          type: string
-          enum: ["started", "stopped", "already_running", "not_running", "error"]
-          description: Pipeline status
-        message:
-          type: string
-          description: Error message (only present when status is "error")
-
-    VolumeRequest:
-      type: object
-      required:
-        - volume
-      properties:
-        volume:
-          type: integer
-          minimum: 1
-          maximum: 100
-          description: Volume percentage (1-100)
-          example: 75
-
-    VolumeResponse:
-      type: object
-      properties:
-        status:
-          type: string
-          enum: ["success", "error"]
-        volume:
-          type: integer
-          description: Current volume level
-        message:
-          type: string
-          description: Status message
-
-    VolumeGetResponse:
-      type: object
-      properties:
-        status:
-          type: string
-          enum: ["success", "error"]
-        volume:
-          type: integer
-          nullable: true
-          description: Current volume level (null if TTS not initialized)
-        message:
-          type: string
-          description: Error message (only present when status is "error")
-
-    # ============================================================================
-    # Match Events Schemas
-    # ============================================================================
-
-    MatchStartedRequest:
-      type: object
-      required:
-        - match_id
-      properties:
-        match_id:
-          type: string
-          description: Unique Dota 2 match identifier
-          example: "8638730876"
-
-    MatchEndRequest:
-      type: object
-      required:
-        - match_id
-        - session_data
-      properties:
-        match_id:
-          type: string
-          description: Unique Dota 2 match identifier
-          example: "8638730876"
-        session_data:
-          $ref: '#/components/schemas/SessionData'
-
-    SessionData:
-      type: object
-      description: Player performance statistics from the match
-      required:
-        - hero_id
-        - hero_facet
-        - Facet_Selected
-        - Win
-        - role
-        - game_time
-        - date
-        - networth
-        - xpm
-        - lasthit
-        - denies
-        - death_participant
-        - sentry_ward
-        - observer_ward
-        - kill_participant
-        - kill
-        - death
-        - assist
-      properties:
-        hero_id:
-          type: integer
-          description: Dota 2 hero ID
-          example: 35
-        hero_facet:
-          type: integer
-          description: Selected facet number (1-2)
-          example: 1
-        Facet_Selected:
-          type: string
-          description: Human-readable facet name
-          example: "Ghillie Suit"
-        Win:
-          type: string
-          enum: ["Win", "Lose"]
-          description: Match result
-          example: "Win"
-        role:
-          type: string
-          enum: ["Carry", "Mid", "Offlane", "Support", "Hard Support"]
-          description: Player's selected role
-          example: "Hard Support"
-        game_time:
-          type: number
-          format: float
-          description: Match duration in seconds
-          example: 1209.0
-        date:
-          type: string
-          description: Match end timestamp (YYYY-MM-DD HH:MM:SS)
-          example: "2026-01-07 10:36:18"
-        networth:
-          type: integer
-          description: Final networth in gold
-          example: 16512
-        xpm:
-          type: number
-          format: float
-          description: Experience per minute
-          example: 610.0
-        lasthit:
-          type: integer
-          description: Total last hits
-          example: 99
-        denies:
-          type: integer
-          description: Total denies
-          example: 1
-        kill_participant:
-          type: number
-          format: float
-          description: Kill participation % = (kills + assists) / team_kills * 100
-          example: 54.84
-        death_participant:
-          type: number
-          format: float
-          description: Death participation % = deaths / enemy_team_kills * 100
-          example: 14.29
-        kill:
-          type: integer
-          description: Total kills
-          example: 12
-        death:
-          type: integer
-          description: Total deaths
-          example: 2
-        assist:
-          type: integer
-          description: Total assists
-          example: 5
-        observer_ward:
-          type: integer
-          description: Observer wards purchased
-          example: 2
-        sentry_ward:
-          type: integer
-          description: Sentry wards purchased
-          example: 1
-
-    WebhookResponse:
-      type: object
-      properties:
-        status:
-          type: string
-          enum: ["ok"]
-          example: "ok"
-
-    Error:
-      type: object
-      properties:
-        detail:
-          oneOf:
-            - type: string
-            - type: array
-              items:
-                type: object
-                properties:
-                  loc:
-                    type: array
-                    items:
-                      type: string
-                  msg:
-                    type: string
-                  type:
-                    type: string
+              example: {status: ok}
