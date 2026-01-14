@@ -10,18 +10,35 @@ info:
     | GSI Handler | 19151 | Dota 2 Game State Integration |
     | Match Events | 18100 | Flutter implements this server |
 
+    ## What's New in v2.0.0
+
+    ### Automated Features
+    The following features are now **fully automated** and no longer require manual API calls:
+    - **Pipeline Start/Stop**: Auto-detection watcher starts pipeline when Dota 2 opens, stops when it closes
+    - **Match Detection**: Automatically detects match start and end via GSI
+    - **Hero Detection**: Automatically identifies the player's hero via GSI
+    - **Role Detection**: Player selects role via in-game keyboard shortcut (1-5)
+
+    ### Deprecated Workflow
+    Previously required manual calls to `/start` and `/stop` - these are now optional and handled automatically.
+
     ## Flutter Integration Flow
-    1. GET /ready - Check backend running
-    2. GET /player_info - Check if Steam ID set
-    3. POST /set_player - Set Steam ID
-    4. Done - auto-detection handles rest
+    1. `GET /ready` - Check backend is running
+    2. `GET /player_info` - Check if Steam ID is configured
+    3. `POST /set_player` - Set Steam ID (one-time setup)
+    4. **Done** - Auto-detection handles everything else
 
-    ## Auto-Detection
-    Watcher auto-starts/stops pipeline when Dota 2 opens/closes.
-    No need to call /start or /stop manually.
+    Backend will automatically POST to Flutter's `/match_started` and `/match_end` endpoints.
 
-    ## Flutter Server (port 18100)
-    Flutter must implement POST /match_started and POST /match_end
+    ## Auto-Detection Watcher
+    The watcher monitors for the Dota 2 process:
+    - **Dota 2 Opens** -> Pipeline auto-starts, GSI begins receiving data
+    - **Dota 2 Closes** -> Pipeline auto-stops, resources cleaned up
+    - No polling required from Flutter side
+
+    ## Flutter Server Requirements (Port 18100)
+    Flutter must implement a local HTTP server on port 18100 with two POST endpoints.
+    The coaching backend will call these endpoints automatically during gameplay.
 
     ## GSI Setup (Windows)
 
@@ -76,133 +93,477 @@ servers:
 
 tags:
   - name: Player Setup
+    description: One-time player configuration endpoints
   - name: Status
+    description: Health check and status monitoring endpoints
   - name: Pipeline Control
+    description: Manual pipeline control (optional - auto-detection handles this)
   - name: Match Events (Flutter Server)
+    description: Webhooks that Flutter must implement to receive match data
 
 paths:
   /set_player:
     post:
       tags: [Player Setup]
       summary: Set Steam ID
+      description: |
+        Configure the Steam ID for the player. This is a **one-time setup** required before coaching can begin.
+        The backend uses this to identify the player in GSI data and fetch player statistics.
+
+        **To replace an existing Steam ID:**
+        - Pass `force: true` in the request body
+        - Without force, returns error if Steam ID already set
       requestBody:
+        required: true
         content:
           application/json:
-            example: {steam_id: "76561197960272226"}
+            schema:
+              $ref: '#/components/schemas/SetPlayerRequest'
+            examples:
+              basic:
+                summary: First time setup
+                value:
+                  steam_id: "76561197960272226"
+              force_override:
+                summary: Override existing Steam ID
+                value:
+                  steam_id: "76561197960272226"
+                  force: true
       responses:
         "200":
+          description: Steam ID set successfully
           content:
             application/json:
-              example: {status: success, player_name: Wile}
+              schema:
+                $ref: '#/components/schemas/SetPlayerResponse'
+              example:
+                status: success
+                player_name: Wile
+        "409":
+          description: Steam ID already set (use force=true to override)
+          content:
+            application/json:
+              example:
+                status: already_set
+                current_steam_id: "76561197960272226"
+                message: Steam ID already set. Use force=true to override.
 
   /player_info:
     get:
       tags: [Player Setup]
       summary: Get player info
+      description: |
+        Retrieve the currently configured player information.
+        Use this to check if Steam ID has been set before prompting user for setup.
       responses:
         "200":
+          description: Player info retrieved
           content:
             application/json:
-              example: {status: success, steam_id: "76561197960272226"}
+              schema:
+                $ref: '#/components/schemas/PlayerInfoResponse'
+              example:
+                status: success
+                steam_id: "76561197960272226"
+                player_name: Wile
 
   /ready:
     get:
       tags: [Status]
       summary: Check backend ready
+      description: |
+        Health check endpoint to verify the coaching backend is running and responsive.
+        Use this on app startup to ensure the backend service is available.
       responses:
         "200":
+          description: Backend status
           content:
             application/json:
-              example: {ready: true, running: false}
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+              example:
+                ready: true
+                running: false
 
   /watcher_status:
     get:
       tags: [Status]
       summary: Get watcher status
+      description: |
+        Check the status of the Dota 2 process watcher.
+        Returns whether the watcher is active and if Dota 2 is currently detected.
       responses:
         "200":
+          description: Watcher status
           content:
             application/json:
-              example: {watcher_running: true, dota_detected: true}
+              schema:
+                $ref: '#/components/schemas/WatcherStatusResponse'
+              example:
+                watcher_running: true
+                dota_detected: true
 
   /start:
     post:
       tags: [Pipeline Control]
-      summary: Manual start (optional - watcher auto-starts)
+      summary: Manual start (optional)
+      description: |
+        **Optional** - The auto-detection watcher handles this automatically.
+        Manually start the coaching pipeline. Only use this if you need to override
+        the automatic behavior or for testing purposes.
+
+        **No longer required due to automation:**
+        - No request body or parameters needed
+        - Pipeline starts automatically when Dota 2 opens
+        - Match detection handled via GSI
+        - Hero detection handled via GSI
       responses:
         "200":
+          description: Pipeline started
           content:
             application/json:
-              example: {status: started}
+              schema:
+                $ref: '#/components/schemas/PipelineResponse'
+              example:
+                status: started
 
   /stop:
     post:
       tags: [Pipeline Control]
-      summary: Manual stop (optional - watcher auto-stops)
+      summary: Manual stop (optional)
+      description: |
+        **Optional** - The auto-detection watcher handles this automatically.
+        Manually stop the coaching pipeline. Only use this if you need to override
+        the automatic behavior or for testing purposes.
+
+        **No longer required due to automation:**
+        - No request body or parameters needed
+        - Pipeline stops automatically when Dota 2 closes
+        - All resources cleaned up automatically
+        - Match end data sent before shutdown
       responses:
         "200":
+          description: Pipeline stopped
           content:
             application/json:
-              example: {status: stopped}
+              schema:
+                $ref: '#/components/schemas/PipelineResponse'
+              example:
+                status: stopped
 
   /volume_set:
     post:
       tags: [Pipeline Control]
       summary: Set TTS volume
+      description: |
+        Set the text-to-speech volume for coaching audio feedback.
+        Volume range is 0 (mute) to 100 (maximum).
       requestBody:
+        required: true
         content:
           application/json:
-            example: {volume: 75}
+            schema:
+              $ref: '#/components/schemas/VolumeSetRequest'
+            example:
+              volume: 75
       responses:
         "200":
+          description: Volume set successfully
           content:
             application/json:
-              example: {status: success, volume: 75}
+              schema:
+                $ref: '#/components/schemas/VolumeResponse'
+              example:
+                status: success
+                volume: 75
 
   /volume_get:
     get:
       tags: [Pipeline Control]
       summary: Get TTS volume
+      description: |
+        Get the current text-to-speech volume setting.
       responses:
         "200":
+          description: Current volume
           content:
             application/json:
-              example: {status: success, volume: 75}
+              schema:
+                $ref: '#/components/schemas/VolumeResponse'
+              example:
+                status: success
+                volume: 75
 
   /match_started:
     post:
       tags: [Match Events (Flutter Server)]
-      summary: Match started webhook (Flutter implements)
+      summary: Match started webhook
+      description: |
+        **Flutter must implement this endpoint.**
+        Called by the coaching backend when a new match is detected.
+        Use this to update UI, start tracking, or initialize match-specific features.
       requestBody:
+        required: true
         content:
           application/json:
-            example: {match_id: "8648059066"}
+            schema:
+              $ref: '#/components/schemas/MatchStartedRequest'
+            example:
+              match_id: "8648059066"
       responses:
         "200":
+          description: Acknowledge receipt
           content:
             application/json:
-              example: {status: ok}
+              example:
+                status: ok
 
   /match_end:
     post:
       tags: [Match Events (Flutter Server)]
-      summary: Match ended webhook (Flutter implements)
+      summary: Match ended webhook
+      description: |
+        **Flutter must implement this endpoint.**
+        Called by the coaching backend when a match ends. Contains comprehensive
+        session data including hero played, game outcome, statistics, and performance metrics.
+        Use this to display post-game summary, save match history, or trigger analytics.
       requestBody:
+        required: true
         content:
           application/json:
+            schema:
+              $ref: '#/components/schemas/MatchEndRequest'
             example:
               match_id: "8648059066"
               session_data:
                 hero_id: 35
-                Win: Win
-                role: Support
-                game_time: 553
+                hero_facet: 1
+                Facet_Selected: "Ghillie Suit"
+                Win: "Win"
+                role: "Support"
+                game_time: 553.0
+                date: "2026-01-14 00:09:44"
                 networth: 20491
+                xpm: 935.0
+                lasthit: 61
+                denies: 0
                 kill: 0
                 death: 0
                 assist: 0
+                kill_participant: 0.0
+                death_participant: 0.0
+                observer_ward: 0
+                sentry_ward: 0
       responses:
         "200":
+          description: Acknowledge receipt
           content:
             application/json:
-              example: {status: ok}
+              example:
+                status: ok
+
+components:
+  schemas:
+    SetPlayerRequest:
+      type: object
+      required:
+        - steam_id
+      properties:
+        steam_id:
+          type: string
+          description: Steam ID in 64-bit format
+          example: "76561197960272226"
+        force:
+          type: boolean
+          default: false
+          description: Set to true to override an existing Steam ID
+          example: false
+
+    SetPlayerResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          description: Operation result
+          example: success
+        player_name:
+          type: string
+          description: Player's Steam display name
+          example: Wile
+
+    PlayerInfoResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        steam_id:
+          type: string
+          description: Configured Steam ID
+          example: "76561197960272226"
+        player_name:
+          type: string
+          description: Player's Steam display name
+          example: Wile
+
+    ReadyResponse:
+      type: object
+      properties:
+        ready:
+          type: boolean
+          description: Whether backend is ready to accept requests
+          example: true
+        running:
+          type: boolean
+          description: Whether coaching pipeline is currently running
+          example: false
+
+    WatcherStatusResponse:
+      type: object
+      properties:
+        watcher_running:
+          type: boolean
+          description: Whether the Dota 2 process watcher is active
+          example: true
+        dota_detected:
+          type: boolean
+          description: Whether Dota 2 process is currently detected
+          example: true
+
+    PipelineResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [started, stopped]
+          description: Pipeline state after operation
+          example: started
+
+    VolumeSetRequest:
+      type: object
+      required:
+        - volume
+      properties:
+        volume:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: TTS volume level (0-100)
+          example: 75
+
+    VolumeResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        volume:
+          type: integer
+          description: Current volume level
+          example: 75
+
+    MatchStartedRequest:
+      type: object
+      required:
+        - match_id
+      properties:
+        match_id:
+          type: string
+          description: Dota 2 match ID
+          example: "8648059066"
+
+    MatchEndRequest:
+      type: object
+      required:
+        - match_id
+        - session_data
+      properties:
+        match_id:
+          type: string
+          description: Dota 2 match ID
+          example: "8648059066"
+        session_data:
+          $ref: '#/components/schemas/SessionData'
+
+    SessionData:
+      type: object
+      description: Complete match session statistics
+      properties:
+        hero_id:
+          type: integer
+          description: Dota 2 hero ID
+          example: 35
+        hero_facet:
+          type: integer
+          description: Selected hero facet number (1-based)
+          example: 1
+        Facet_Selected:
+          type: string
+          description: Name of the selected facet
+          example: "Ghillie Suit"
+        Win:
+          type: string
+          enum: ["Win", "Loss"]
+          description: Match outcome
+          example: "Win"
+        role:
+          type: string
+          enum: ["Carry", "Mid", "Offlane", "Support", "Hard Support"]
+          description: Player's role in the match
+          example: "Support"
+        game_time:
+          type: number
+          format: float
+          description: Match duration in seconds
+          example: 553.0
+        date:
+          type: string
+          description: Match end timestamp (YYYY-MM-DD HH:MM:SS)
+          example: "2026-01-14 00:09:44"
+        networth:
+          type: integer
+          description: Final networth at match end
+          example: 20491
+        xpm:
+          type: number
+          format: float
+          description: Experience per minute
+          example: 935.0
+        lasthit:
+          type: integer
+          description: Total last hits
+          example: 61
+        denies:
+          type: integer
+          description: Total denies
+          example: 0
+        kill:
+          type: integer
+          description: Total kills
+          example: 0
+        death:
+          type: integer
+          description: Total deaths
+          example: 0
+        assist:
+          type: integer
+          description: Total assists
+          example: 0
+        kill_participant:
+          type: number
+          format: float
+          description: Kill participation percentage (0.0 - 1.0)
+          example: 0.0
+        death_participant:
+          type: number
+          format: float
+          description: Death participation percentage (0.0 - 1.0)
+          example: 0.0
+        observer_ward:
+          type: integer
+          description: Observer wards placed
+          example: 0
+        sentry_ward:
+          type: integer
+          description: Sentry wards placed
+          example: 0
