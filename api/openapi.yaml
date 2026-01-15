@@ -19,27 +19,17 @@ info:
 
     ## Authentication
 
-    Most API endpoints require authentication via API key.
+    All API endpoints require authentication via API key.
 
     **Header:** `X-API-Key: <your_api_key>`
 
-    API keys are automatically generated when users authenticate via Steam login.
-    The `/auth/steam/login` and `/auth/callback` endpoints do NOT require an API key -
-    they are used to obtain one.
-
-    ### How to Get an API Key
-
-    1. Call `GET /auth/steam/login` to initiate Steam OpenID authentication
-    2. User logs in on Steam's website
-    3. Steam redirects to `/auth/callback`
-    4. Your app receives the API key via deep link: `mentoroid://auth/callback?steam_id=XXX&token=mk_YYY`
+    API keys are automatically generated when users sign up in the Mentoroid app.
+    See the [Firebase Functions documentation](/firebase/README.md) for details.
 
     ### Rate Limits
 
     | Endpoint | Limit |
     |----------|-------|
-    | `/auth/steam/login` | 10 requests/minute |
-    | `/auth/callback` | 20 requests/minute |
     | `/analyze` | 10 requests/minute |
     | `/analyze-bulk` | 2 requests/minute |
     | `/public-check` | 30 requests/minute |
@@ -63,8 +53,6 @@ security:
   - ApiKeyAuth: []
 
 tags:
-  - name: Authentication
-    description: Steam OpenID authentication endpoints (no API key required)
   - name: Player Stats
     description: Player statistics and match history
   - name: Analysis
@@ -761,136 +749,6 @@ paths:
                 $ref: '#/components/schemas/Error'
 
   # ============================================================================
-  # Steam Authentication Endpoints (No API Key Required)
-  # ============================================================================
-
-  /auth/steam/login:
-    get:
-      tags:
-        - Authentication
-      summary: Initiate Steam login
-      description: |
-        Initiates Steam OpenID authentication flow.
-
-        **This endpoint does NOT require an API key** - it's used to obtain one.
-
-        ## Flow
-        1. Flutter app opens this URL in browser/webview
-        2. User is redirected to Steam's login page
-        3. After login, Steam redirects to `/auth/callback`
-        4. User receives API key via deep link
-
-        ## Usage
-        ```
-        GET https://dev.mentoroid.ai/auth/steam/login
-        ```
-
-        The response is a 302 redirect to Steam's OpenID login page.
-
-        ## Rate Limits
-        - 10 requests per minute per IP
-      operationId: steamLogin
-      security: []  # No authentication required
-      responses:
-        '302':
-          description: Redirect to Steam login page
-          headers:
-            Location:
-              description: Steam OpenID login URL
-              schema:
-                type: string
-                example: "https://steamcommunity.com/openid/login?openid.ns=..."
-        '500':
-          description: Server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /auth/callback:
-    get:
-      tags:
-        - Authentication
-      summary: Steam login callback
-      description: |
-        Handles the callback from Steam after successful OpenID authentication.
-
-        **This endpoint does NOT require an API key** - it generates one.
-
-        ## Flow
-        1. Steam redirects here after successful login
-        2. Server verifies the OpenID response with Steam
-        3. Server creates user in Firebase (if new) or retrieves existing user
-        4. Server redirects to Flutter app via deep link with credentials
-
-        ## Deep Link Format
-
-        **Success:**
-        ```
-        mentoroid://auth/callback?steam_id=76561199813585151&token=mk_abc123...
-        ```
-
-        **Error:**
-        ```
-        mentoroid://auth/callback?error=verification_failed
-        ```
-
-        ## Error Types
-        | Error | Description |
-        |-------|-------------|
-        | `verification_failed` | Steam OpenID verification failed |
-        | `invalid_steam_id` | Could not extract Steam ID from response |
-        | `user_creation_failed` | Failed to create/retrieve user in Firebase |
-        | `server_error` | Unexpected server error |
-
-        ## Rate Limits
-        - 20 requests per minute per IP
-      operationId: steamCallback
-      security: []  # No authentication required
-      parameters:
-        - name: openid.ns
-          in: query
-          description: OpenID namespace (set by Steam)
-          schema:
-            type: string
-        - name: openid.mode
-          in: query
-          description: OpenID mode (should be "id_res")
-          schema:
-            type: string
-        - name: openid.claimed_id
-          in: query
-          description: Contains the Steam ID
-          schema:
-            type: string
-            example: "https://steamcommunity.com/openid/id/76561199813585151"
-        - name: openid.identity
-          in: query
-          description: Steam identity URL
-          schema:
-            type: string
-        - name: openid.sig
-          in: query
-          description: OpenID signature for verification
-          schema:
-            type: string
-      responses:
-        '302':
-          description: Redirect to Flutter app via deep link
-          headers:
-            Location:
-              description: Deep link URL with steam_id and token (or error)
-              schema:
-                type: string
-                example: "mentoroid://auth/callback?steam_id=76561199813585151&token=mk_abc123..."
-        '429':
-          description: Rate limit exceeded
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RateLimitError'
-
-  # ============================================================================
   # Orchestrator Endpoints
   # ============================================================================
 
@@ -1217,9 +1075,9 @@ components:
       name: X-API-Key
       description: |
         API key for authentication. Keys are automatically generated when users
-        sign up via Steam login or the Mentoroid app and stored in Firebase Firestore.
+        sign up via the Mentoroid app and stored in Firebase Firestore.
 
-        Format: `mk_<32 hexadecimal characters>`
+        Format: `mk_<32 hex characters>`
 
         Example: `mk_a1b2c3d4e5f6789012345678901234ab`
 
