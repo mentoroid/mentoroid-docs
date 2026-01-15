@@ -1,4 +1,4 @@
-# Mentoroid Workflow & Pub/Sub Architecture
+# Mentoroid Pub/Sub Architecture
 
 Complete documentation for running the Mentoroid user data pipeline with Pub/Sub-based asynchronous processing.
 
@@ -166,7 +166,7 @@ curl -X POST http://localhost:58081/match \
     "hero_id": 74,
     "hero_facet": 2,
     "Facet_Selected": "Reflective Counter",
-    "Win": "Won",
+    "Win": "Win",
     "game_time": 2340.5,
     "date": "2026-01-06",
     "networth": 32000,
@@ -360,14 +360,18 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ## Checking Progress
 
-### Get User Manifest
+> **Note:** Orchestrator (58081) has `/user-*` endpoints for workflow status.
+> Stats API (58084) has `/player/*` endpoints for production reads.
+> Use Stats API endpoints for frontend integration.
+
+### Get User Manifest (Orchestrator)
 
 ```bash
 curl http://localhost:58081/user-manifest/76561198047160218 \
   -H "X-API-Key: your-api-key"
 ```
 
-### Get User Profile (after processing complete)
+### Get User Profile (Stats API - recommended for production)
 
 ```bash
 curl http://localhost:58084/player/76561198047160218 \

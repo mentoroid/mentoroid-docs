@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Mentoroid Workflow & Pub/Sub Architecture
+  title: Mentoroid Pub/Sub Architecture
   description: |
     Complete documentation for the Mentoroid user data pipeline and Pub/Sub-based
     asynchronous processing architecture.
@@ -121,18 +121,73 @@ security:
   - ApiKeyAuth: []
 
 tags:
+  - name: Health
+    description: Service health check endpoints
   - name: Path A - Signup
     description: First-time user registration and bulk processing
   - name: Path B - Match
     description: Live match ingestion from Binary client
   - name: Manifest
-    description: User manifest management
+    description: |
+      User manifest management endpoints on **Orchestrator (port 58081)**.
+
+      **Note:** Stats API (port 58084) has similar read endpoints with different paths:
+      - Stats API: `GET /player/{steam_id}` → Orchestrator: `GET /user-profile/{steam_id}`
+      - Stats API: `GET /player/{steam_id}/history` → Orchestrator: `GET /user-history/{steam_id}`
+
+      Use Stats API endpoints for production reads. Orchestrator endpoints are primarily for workflow status checks.
   - name: Internal Services
     description: Internal service endpoints (not for external use)
   - name: Pub/Sub Messages
     description: Pub/Sub message schemas and topics
 
 paths:
+  # ============================================================================
+  # Health Check
+  # ============================================================================
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check endpoint
+      description: |
+        Returns service health status.
+
+        All services expose this endpoint on their respective ports:
+        - Orchestrator: `http://localhost:58081/health`
+        - Stats API: `http://localhost:58084/health`
+        - PGA Trigger: `http://localhost:58085/health`
+        - Aggregate Service: `http://localhost:58086/health`
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy]
+                  service:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+              example:
+                status: "healthy"
+                service: "orchestrator"
+                timestamp: "2026-01-09T10:00:00Z"
+        '503':
+          description: Service unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   # ============================================================================
   # Path A: Signup Flow
   # ============================================================================
@@ -276,7 +331,7 @@ paths:
               hero_id: 74
               hero_facet: 2
               Facet_Selected: "Reflective Counter"
-              Win: "Won"
+              Win: "Win"
               game_time: 2340.5
               date: "2026-01-06"
               networth: 32000
@@ -611,7 +666,7 @@ components:
           description: Facet name
         Win:
           type: string
-          enum: [Won, Lost]
+          enum: [Win, Loss]
         game_time:
           type: number
           description: Game duration in seconds
@@ -689,7 +744,7 @@ components:
           type: string
         result:
           type: string
-          enum: [Won, Lost]
+          enum: [Win, Loss]
         player_team:
           type: string
           enum: [Radiant, Dire]
