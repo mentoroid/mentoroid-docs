@@ -19,12 +19,12 @@ info:
 
     ## Authentication
 
-    All API endpoints require authentication via API key.
+    Most API endpoints require authentication via API key.
 
     **Header:** `X-API-Key: <your_api_key>`
 
-    API keys are automatically generated when users sign up in the Mentoroid app.
-    See the [Firebase Functions documentation](/firebase/README.md) for details.
+    API keys are automatically generated when users authenticate via Steam login.
+    See the [Steam Authentication API](../auth/) for login endpoints.
 
     ### Rate Limits
 
@@ -1075,9 +1075,9 @@ components:
       name: X-API-Key
       description: |
         API key for authentication. Keys are automatically generated when users
-        sign up via the Mentoroid app and stored in Firebase Firestore.
+        sign up via Steam login or the Mentoroid app and stored in Firebase Firestore.
 
-        Format: `mk_<32 hex characters>`
+        Format: `mk_<32 hexadecimal characters>`
 
         Example: `mk_a1b2c3d4e5f6789012345678901234ab`
 
