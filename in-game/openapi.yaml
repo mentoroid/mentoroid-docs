@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Mentoroid In-Game Coaching API
-  version: 2.0.0
+  version: 2.1.0
   description: |
     ## Overview
     | Service | Port | Purpose |
@@ -9,6 +9,15 @@ info:
     | Coaching Backend | 39144 | Pipeline control, player setup |
     | GSI Handler | 19151 | Dota 2 Game State Integration |
     | Match Events | 18100 | Flutter implements this server |
+
+    ## What's New in v2.1.0
+
+    ### Voice Pack System
+    New voice control endpoints for selecting and previewing TTS voice packs:
+    - `POST /voice_set` - Set voice pack (fin = male, lily = female)
+    - `GET /voice_get` - Get current voice and available options
+    - `GET /voice_list` - List all voice packs with metadata
+    - `POST /voice_sample` - Preview voice without changing setting
 
     ## What's New in v2.0.0
 
@@ -98,6 +107,8 @@ tags:
     description: Health check and status monitoring endpoints
   - name: Pipeline Control
     description: Manual pipeline control (optional - auto-detection handles this)
+  - name: Voice Control
+    description: TTS voice pack selection and preview
   - name: Match Events (Flutter Server)
     description: Webhooks that Flutter must implement to receive match data
 
@@ -124,10 +135,12 @@ paths:
                 summary: First time setup
                 value:
                   steam_id: "76561197960272226"
+                  api_key: "mentoroid_api_key_here"
               force_override:
                 summary: Override existing Steam ID
                 value:
                   steam_id: "76561197960272226"
+                  api_key: "mentoroid_api_key_here"
                   force: true
       responses:
         "200":
@@ -139,6 +152,27 @@ paths:
               example:
                 status: success
                 player_name: Wile
+                steam_id: "76561197960272226"
+                win_rate: 52.5
+                current_rank: "Archon"
+                selected_roles: ["Carry", "Mid"]
+                prefered_heroes: [1, 35, 74]
+                message: "Player data loaded and saved successfully"
+        "400":
+          description: Missing required field
+          content:
+            application/json:
+              examples:
+                missing_steam_id:
+                  summary: Only API key provided (missing Steam ID)
+                  value:
+                    status: error
+                    message: "Steam ID is required"
+                missing_api_key:
+                  summary: Only Steam ID provided (missing API key)
+                  value:
+                    status: error
+                    message: "API key is required"
         "409":
           description: Steam ID already set (use force=true to override)
           content:
@@ -163,9 +197,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlayerInfoResponse'
               example:
-                status: success
-                steam_id: "76561197960272226"
+                status: loaded
                 player_name: Wile
+                win_rate: 52.5
+                current_rank: "Archon"
+                selected_roles: ["Carry", "Mid"]
+                prefered_heroes: [1, 35, 74]
+                start_data:
+                  selected_roles: ["Carry", "Mid"]
+                  selected_heroes: []
+                  guidance_options: {}
+                  current_rank: "Archon"
+                  prefered_hero_from_win_rate: [1, 35, 74]
 
   /ready:
     get:
@@ -294,6 +337,164 @@ paths:
                 status: success
                 volume: 75
 
+  /voice_set:
+    post:
+      tags: [Voice Control]
+      summary: Set TTS voice pack
+      description: |
+        Set the text-to-speech voice pack. Changes take effect on next audio playback.
+
+        **Available voices:**
+        - `fin` - Male voice
+        - `lily` - Female voice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoiceSetRequest'
+            examples:
+              set_fin:
+                summary: Set male voice (Fin)
+                value:
+                  voice: "fin"
+              set_lily:
+                summary: Set female voice (Lily)
+                value:
+                  voice: "lily"
+      responses:
+        "200":
+          description: Voice set successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceSetResponse'
+              examples:
+                fin_response:
+                  summary: Fin voice set
+                  value:
+                    status: success
+                    voice: "fin"
+                    message: "Voice set to 'fin'"
+                lily_response:
+                  summary: Lily voice set
+                  value:
+                    status: success
+                    voice: "lily"
+                    message: "Voice set to 'lily'"
+        "400":
+          description: Invalid voice pack
+          content:
+            application/json:
+              example:
+                status: error
+                message: "Invalid voice 'invalid'. Available: ['fin', 'lily']"
+
+  /voice_get:
+    get:
+      tags: [Voice Control]
+      summary: Get current voice pack
+      description: |
+        Get the currently selected TTS voice pack and list of available options.
+      responses:
+        "200":
+          description: Current voice info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceGetResponse'
+              examples:
+                fin_selected:
+                  summary: Fin voice selected
+                  value:
+                    status: success
+                    voice: "fin"
+                    available_voices: ["fin", "lily"]
+                lily_selected:
+                  summary: Lily voice selected
+                  value:
+                    status: success
+                    voice: "lily"
+                    available_voices: ["fin", "lily"]
+
+  /voice_list:
+    get:
+      tags: [Voice Control]
+      summary: List all voice packs
+      description: |
+        Get a list of all available voice packs with metadata (name, description).
+      responses:
+        "200":
+          description: List of voice packs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceListResponse'
+              example:
+                status: success
+                voices:
+                  - id: "fin"
+                    name: "Fin"
+                    description: "Male voice"
+                  - id: "lily"
+                    name: "Lily"
+                    description: "Female voice"
+                total: 2
+
+  /voice_sample:
+    post:
+      tags: [Voice Control]
+      summary: Preview voice pack
+      description: |
+        Play a sample audio for the specified voice pack without changing the current setting.
+        Plays 'welcome_to_mentoroid.mp3' from the voice pack folder.
+
+        If no voice is specified, plays sample using the current voice.
+
+        **Does NOT change the current voice setting** - just previews the voice.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoiceSetRequest'
+            examples:
+              preview_fin:
+                summary: Preview Fin voice (male)
+                value:
+                  voice: "fin"
+              preview_lily:
+                summary: Preview Lily voice (female)
+                value:
+                  voice: "lily"
+      responses:
+        "200":
+          description: Sample playing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceSampleResponse'
+              examples:
+                fin_sample:
+                  summary: Fin voice sample
+                  value:
+                    status: success
+                    voice: "fin"
+                    message: "Playing sample for 'fin' voice"
+                lily_sample:
+                  summary: Lily voice sample
+                  value:
+                    status: success
+                    voice: "lily"
+                    message: "Playing sample for 'lily' voice"
+        "400":
+          description: Invalid voice pack
+          content:
+            application/json:
+              example:
+                status: error
+                message: "Invalid voice 'invalid'. Available: ['fin', 'lily']"
+
   /match_started:
     post:
       tags: [Match Events (Flutter Server)]
@@ -333,27 +534,53 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/MatchEndRequest'
-            example:
-              match_id: "8648059066"
-              session_data:
-                hero_id: 35
-                hero_facet: 1
-                Facet_Selected: "Ghillie Suit"
-                Win: "Win"
-                role: "Support"
-                game_time: 553.0
-                date: "2026-01-14 00:09:44"
-                networth: 20491
-                xpm: 935.0
-                lasthit: 61
-                denies: 0
-                kill: 0
-                death: 0
-                assist: 0
-                kill_participant: 0.0
-                death_participant: 0.0
-                observer_ward: 0
-                sentry_ward: 0
+            examples:
+              win_example:
+                summary: Match won
+                value:
+                  match_id: "8648059066"
+                  session_data:
+                    hero_id: 35
+                    hero_facet: 1
+                    Facet_Selected: "Ghillie Suit"
+                    Win: "Win"
+                    role: "Support"
+                    game_time: 2145.0
+                    date: "2026-01-14 00:09:44"
+                    networth: 20491
+                    xpm: 935.0
+                    lasthit: 61
+                    denies: 5
+                    kill: 8
+                    death: 3
+                    assist: 22
+                    kill_participant: 0.72
+                    death_participant: 0.15
+                    observer_ward: 12
+                    sentry_ward: 8
+              lose_example:
+                summary: Match lost
+                value:
+                  match_id: "8648059067"
+                  session_data:
+                    hero_id: 74
+                    hero_facet: 2
+                    Facet_Selected: "Reflective Counter"
+                    Win: "Lose"
+                    role: "Carry"
+                    game_time: 1823.0
+                    date: "2026-01-14 01:15:32"
+                    networth: 15230
+                    xpm: 612.0
+                    lasthit: 185
+                    denies: 12
+                    kill: 5
+                    death: 9
+                    assist: 7
+                    kill_participant: 0.45
+                    death_participant: 0.38
+                    observer_ward: 0
+                    sentry_ward: 0
       responses:
         "200":
           description: Acknowledge receipt
@@ -368,11 +595,16 @@ components:
       type: object
       required:
         - steam_id
+        - api_key
       properties:
         steam_id:
           type: string
           description: Steam ID in 64-bit format
           example: "76561197960272226"
+        api_key:
+          type: string
+          description: Mentoroid API key (required for authentication)
+          example: "mentoroid_api_key_here"
         force:
           type: boolean
           default: false
@@ -390,21 +622,88 @@ components:
           type: string
           description: Player's Steam display name
           example: Wile
+        steam_id:
+          type: string
+          description: Steam ID that was set
+          example: "76561197960272226"
+        win_rate:
+          type: number
+          format: float
+          description: Player's overall win rate percentage
+          example: 52.5
+        current_rank:
+          type: string
+          description: Player's current rank
+          example: "Archon"
+        selected_roles:
+          type: array
+          items:
+            type: string
+          description: Player's preferred roles
+          example: ["Carry", "Mid"]
+        prefered_heroes:
+          type: array
+          items:
+            type: integer
+          description: Hero IDs of player's preferred heroes (by win rate)
+          example: [1, 35, 74]
+        message:
+          type: string
+          description: Confirmation message
+          example: "Player data loaded and saved successfully"
 
     PlayerInfoResponse:
       type: object
       properties:
         status:
           type: string
-          example: success
-        steam_id:
-          type: string
-          description: Configured Steam ID
-          example: "76561197960272226"
+          description: Load status ("loaded" or "not_loaded")
+          example: loaded
         player_name:
           type: string
           description: Player's Steam display name
           example: Wile
+        win_rate:
+          type: number
+          format: float
+          description: Player's overall win rate percentage
+          example: 52.5
+        current_rank:
+          type: string
+          description: Player's current rank
+          example: "Archon"
+        selected_roles:
+          type: array
+          items:
+            type: string
+          description: Player's preferred roles
+          example: ["Carry", "Mid"]
+        prefered_heroes:
+          type: array
+          items:
+            type: integer
+          description: Hero IDs of player's preferred heroes (by win rate)
+          example: [1, 35, 74]
+        start_data:
+          type: object
+          description: Data object passed to pipeline on start
+          properties:
+            selected_roles:
+              type: array
+              items:
+                type: string
+            selected_heroes:
+              type: array
+              items:
+                type: integer
+            guidance_options:
+              type: object
+            current_rank:
+              type: string
+            prefered_hero_from_win_rate:
+              type: array
+              items:
+                type: integer
 
     ReadyResponse:
       type: object
@@ -462,6 +761,96 @@ components:
           description: Current volume level
           example: 75
 
+    VoiceSetRequest:
+      type: object
+      required:
+        - voice
+      properties:
+        voice:
+          type: string
+          enum: ["fin", "lily"]
+          description: Voice pack ID
+          example: "fin"
+
+    VoiceSetResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        voice:
+          type: string
+          description: Selected voice pack ID
+          example: "fin"
+        message:
+          type: string
+          description: Confirmation message
+          example: "Voice set to 'fin'"
+
+    VoiceGetResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        voice:
+          type: string
+          description: Currently selected voice pack ID
+          example: "fin"
+        available_voices:
+          type: array
+          items:
+            type: string
+          description: List of available voice pack IDs
+          example: ["fin", "lily"]
+
+    VoiceListResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        voices:
+          type: array
+          items:
+            $ref: '#/components/schemas/VoiceInfo'
+          description: List of available voice packs with metadata
+        total:
+          type: integer
+          description: Total number of available voices
+          example: 2
+
+    VoiceInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Voice pack ID
+          example: "fin"
+        name:
+          type: string
+          description: Display name
+          example: "Fin"
+        description:
+          type: string
+          description: Voice description
+          example: "Male voice"
+
+    VoiceSampleResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        voice:
+          type: string
+          description: Voice pack being previewed
+          example: "lily"
+        message:
+          type: string
+          description: Confirmation message
+          example: "Playing sample for 'lily' voice"
+
     MatchStartedRequest:
       type: object
       required:
@@ -503,7 +892,7 @@ components:
           example: "Ghillie Suit"
         Win:
           type: string
-          enum: ["Win", "Loss"]
+          enum: ["Win", "Lose"]
           description: Match outcome
           example: "Win"
         role:
