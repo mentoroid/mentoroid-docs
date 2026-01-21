@@ -1,0 +1,118 @@
+openapi: 3.0.3
+info:
+  title: Benchmark Data Access
+  description: |
+    ## Overview
+
+    Benchmark data is hosted on a public Google Cloud Storage (GCS) bucket.
+    Frontend can directly fetch this data without authentication.
+
+    Whenever benchmark data needs to be displayed on any screen (e.g., Session End Screen,
+    PGA Screen), you can build the URL using the parameters below and fetch the data
+    directly from the GCS bucket. **No API call required.**
+
+    ---
+
+    ## How to Access Benchmark Data
+
+    ### Base URL Format
+    ```
+    https://storage.googleapis.com/mentoroid-public-data/benchmarks/hero_specific/current_week/{HERO_ID}/{RANK}/{ROLE}.json
+    ```
+
+    ### Example URL
+    ```
+    https://storage.googleapis.com/mentoroid-public-data/benchmarks/hero_specific/current_week/1/ancient/carry.json
+    ```
+
+    ---
+
+    ## Available Roles
+
+    | Role         | File Name         |
+    |--------------|-------------------|
+    | Carry        | carry.json        |
+    | Mid          | mid.json          |
+    | Offlane      | offlane.json      |
+    | Hard Support | hard_support.json |
+    | Soft Support | soft_support.json |
+
+    ---
+
+    ## Available Ranks
+
+    | Rank      |
+    |-----------|
+    | herald    |
+    | guardian  |
+    | crusader  |
+    | archon    |
+    | legend    |
+    | ancient   |
+    | divine    |
+
+  version: 1.0.0
+  contact:
+    email: support@mentoroid.ai
+
+servers:
+  - url: https://storage.googleapis.com/mentoroid-public-data
+    description: GCS Public Bucket
+
+paths:
+  /benchmarks/hero_specific/current_week/{hero_id}/{rank}/{role}.json:
+    get:
+      summary: Get Hero Benchmark Data
+      description: |
+        Fetch benchmark data for a specific hero, rank, and role combination.
+
+        This is a direct GCS fetch - no authentication required.
+      operationId: getHeroBenchmark
+      tags:
+        - Benchmarks
+      parameters:
+        - name: hero_id
+          in: path
+          required: true
+          description: Hero ID (e.g., 1, 2, 3...)
+          schema:
+            type: integer
+            example: 1
+        - name: rank
+          in: path
+          required: true
+          description: Player rank
+          schema:
+            type: string
+            enum:
+              - herald
+              - guardian
+              - crusader
+              - archon
+              - legend
+              - ancient
+              - divine
+            example: ancient
+        - name: role
+          in: path
+          required: true
+          description: Player role
+          schema:
+            type: string
+            enum:
+              - carry
+              - mid
+              - offlane
+              - hard_support
+              - soft_support
+            example: carry
+      responses:
+        '200':
+          description: Benchmark data retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Hero-specific benchmark statistics
+        '404':
+          description: Benchmark data not found for the specified combination
