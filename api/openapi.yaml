@@ -1606,6 +1606,20 @@ components:
 
         Contains detailed metrics extracted from the DEM replay file, compared against
         rank-specific benchmarks, with AI-generated narrative insights.
+
+        ## Metadata Support
+
+        Several data sections include a `metadata` property that provides human-readable
+        labels and tooltips for UI display. These sections include:
+        - `session_screen`
+        - `graph_info`
+        - `phase_wise_stats` (and each phase: `0-10_min`, `10-30_min`, `30+_min`)
+        - `key_items_timing`
+        - `level_progress`
+        - `role_wise_metrics`
+        - `universal_metrics`
+
+        See the `FieldMetadata` schema for the metadata structure.
       properties:
         general_match_info:
           type: object
@@ -1852,6 +1866,11 @@ components:
           description: |
             Raw player values compared to rank-specific benchmarks.
             Each stat has `raw` (player's actual value) and `benchmark` (average for rank).
+
+            **Note:** Contains `metadata` property with human-readable field labels and tooltips.
+          properties:
+            metadata:
+              $ref: '#/components/schemas/FieldMetadata'
           additionalProperties:
             type: object
             properties:
@@ -1864,8 +1883,13 @@ components:
 
         graph_info:
           type: object
-          description: Minute-by-minute time-series data for visualizations
+          description: |
+            Minute-by-minute time-series data for visualizations.
+
+            **Note:** Contains `metadata` property with human-readable field labels and tooltips.
           properties:
+            metadata:
+              $ref: '#/components/schemas/FieldMetadata'
             gold:
               type: array
               description: Gold at each minute
@@ -1884,12 +1908,19 @@ components:
 
         phase_wise_stats:
           type: object
-          description: Detailed statistics broken down by game phase
+          description: |
+            Detailed statistics broken down by game phase.
+
+            **Note:** Each phase object contains a `metadata` property with human-readable field labels and tooltips.
           properties:
+            metadata:
+              $ref: '#/components/schemas/FieldMetadata'
             0-10_min:
               type: object
               description: Early game / laning phase
               properties:
+                metadata:
+                  $ref: '#/components/schemas/FieldMetadata'
                 kills_at_10:
                   type: integer
                 deaths_at_10:
@@ -1923,6 +1954,8 @@ components:
               type: object
               description: Mid game / teamfight phase
               properties:
+                metadata:
+                  $ref: '#/components/schemas/FieldMetadata'
                 kill_participation:
                   type: number
                 teamfight_participation:
@@ -1941,6 +1974,8 @@ components:
               type: object
               description: Late game
               properties:
+                metadata:
+                  $ref: '#/components/schemas/FieldMetadata'
                 kill_participation:
                   type: number
                 teamfight_participation:
@@ -1970,6 +2005,11 @@ components:
           type: object
           description: |
             Key item purchase timings. Keys are item names, values contain timing and metadata.
+
+            **Note:** Contains `metadata` property with human-readable field labels and tooltips.
+          properties:
+            metadata:
+              $ref: '#/components/schemas/FieldMetadata'
           additionalProperties:
             type: object
             properties:
@@ -1987,6 +2027,11 @@ components:
           type: object
           description: |
             Level milestone timings. Keys are level numbers, values are "MM:SS" timestamps.
+
+            **Note:** Contains `metadata` property with human-readable field labels and tooltips.
+          properties:
+            metadata:
+              $ref: '#/components/schemas/FieldMetadata'
           additionalProperties:
             type: string
           example:
@@ -1996,8 +2041,13 @@ components:
 
         role_wise_metrics:
           type: object
-          description: Role-specific performance metrics
+          description: |
+            Role-specific performance metrics.
+
+            **Note:** Contains `metadata` property with human-readable field labels and tooltips.
           properties:
+            metadata:
+              $ref: '#/components/schemas/FieldMetadata'
             gank_participation:
               type: number
               description: Percentage of ganks participated in
@@ -2024,8 +2074,13 @@ components:
 
         universal_metrics:
           type: object
-          description: Cross-role performance indicators
+          description: |
+            Cross-role performance indicators.
+
+            **Note:** Contains `metadata` property with human-readable field labels and tooltips.
           properties:
+            metadata:
+              $ref: '#/components/schemas/FieldMetadata'
             combat_effectiveness:
               type: object
               properties:
@@ -2126,3 +2181,43 @@ components:
         total_hero_healing_done:
           type: integer
           description: Total healing done to allied heroes
+
+    # Metadata Schema
+    FieldMetadata:
+      type: object
+      description: |
+        Metadata object embedded within data sections to provide human-readable
+        field labels and tooltips for UI display.
+
+        **Structure:**
+        - `_description`: Overall description of the data section
+        - `{field_name}`: Object with `display_name` and `tool_tip` for each field
+
+        **Example:**
+        ```json
+        {
+          "_description": "Key performance stats for this game phase",
+          "kills_at_10": {
+            "display_name": "Kills at 10 min",
+            "tool_tip": "Number of enemy heroes killed in the first 10 minutes"
+          },
+          "lane_result": {
+            "display_name": "Lane Outcome",
+            "tool_tip": "Whether the player won, lost, or drew their lane"
+          }
+        }
+        ```
+      properties:
+        _description:
+          type: string
+          description: Human-readable description of this data section
+      additionalProperties:
+        type: object
+        description: Field-specific metadata
+        properties:
+          display_name:
+            type: string
+            description: Human-readable label for the field (used in UI)
+          tool_tip:
+            type: string
+            description: Detailed explanation shown on hover/tap
