@@ -12,10 +12,10 @@ info:
 
     ## Base URLs
 
-    | Environment | Stats API | Orchestrator |
-    |-------------|-----------|--------------|
-    | Dev | `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev` | `https://dev.mentoroid.ai` |
-    | Prod | `https://asia-southeast1-mentoroid-app.cloudfunctions.net/stats-api` | `https://api.mentoroid.ai` |
+    | Environment | Stats API | Public Check | Orchestrator |
+    |-------------|-----------|--------------|--------------|
+    | Dev | `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev` | `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/public-check-dev` | `https://dev.mentoroid.ai` |
+    | Prod | `https://asia-southeast1-mentoroid-app.cloudfunctions.net/stats-api` | `https://asia-southeast1-mentoroid-app.cloudfunctions.net/public-check` | `https://api.mentoroid.ai` |
 
     ## Authentication
 
@@ -895,7 +895,16 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /public-check:
+  # ============================================================================
+  # Public Check API Endpoint (Separate Cloud Function)
+  # ============================================================================
+  # NOTE: This is a standalone Cloud Function, NOT part of stats-api.
+  # The path below matches the Cloud Function name.
+
+  /public-check-dev:
+    servers:
+      - url: https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net
+        description: Public Check API - Development
     get:
       tags:
         - Player Stats
@@ -907,6 +916,12 @@ paths:
         data is accessible. If data is private, analysis will fail.
 
         This endpoint wraps the Steam Web API internally - no Steam API key required from client.
+
+        **Base URLs:**
+        | Environment | URL |
+        |-------------|-----|
+        | Dev | `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/public-check-dev` |
+        | Prod | `https://asia-southeast1-mentoroid-app.cloudfunctions.net/public-check` |
 
         **Response:** Returns only the status code from Steam API.
 
