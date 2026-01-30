@@ -6,16 +6,35 @@ info:
 
     ## Architecture
 
-    The API consists of two main services:
-    - **Stats API** (Cloud Function): Read-only, fast queries for player stats
-    - **Orchestrator** (Cloud Run): Write operations, triggers analysis workflows
+    The API consists of multiple services. **Each endpoint group uses a different base URL.**
+
+    | Service | Type | Purpose |
+    |---------|------|---------|
+    | **Stats API** | Cloud Function | Read-only player stats (`/player/*`, `/stats/*`) |
+    | **Dota2 Meta** | Cloud Function | Meta heroes and coaching data (`/dota2-meta`) |
+    | **Orchestrator** | Cloud Run | Analysis triggers (`/analyze`, `/status/*`) |
 
     ## Base URLs
 
-    | Environment | Stats API | Public Check | Orchestrator |
-    |-------------|-----------|--------------|--------------|
-    | Dev | `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev` | `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/public-check-dev` | `https://dev.mentoroid.ai` |
-    | Prod | `https://asia-southeast1-mentoroid-app.cloudfunctions.net/stats-api` | `https://asia-southeast1-mentoroid-app.cloudfunctions.net/public-check` | `https://api.mentoroid.ai` |
+    ⚠️ **Important:** Different endpoints use different base URLs. Check the tag description for each endpoint group.
+
+    ### Stats API (Player Stats, Legacy)
+    | Environment | Base URL |
+    |-------------|----------|
+    | Dev | `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev` |
+    | Prod | `https://asia-southeast1-mentoroid-app.cloudfunctions.net/stats-api` |
+
+    ### Dota2 Meta (Meta Data)
+    | Environment | Base URL |
+    |-------------|----------|
+    | Dev | `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/dota2-meta-dev` |
+    | Prod | `https://asia-southeast1-mentoroid-app.cloudfunctions.net/dota2-meta` |
+
+    ### Orchestrator (Analysis)
+    | Environment | Base URL |
+    |-------------|----------|
+    | Dev | `https://dev.mentoroid.ai` |
+    | Prod | `https://api.mentoroid.ai` |
 
     ## Authentication
 
@@ -28,14 +47,14 @@ info:
 
     ### Rate Limits
 
-    | Endpoint | Limit |
-    |----------|-------|
-    | `/analyze` | 10 requests/minute |
-    | `/analyze-bulk` | 2 requests/minute |
-    | `/public-check` | 30 requests/minute |
-    | `/status/*` | 60 requests/minute |
-    | `/dota2-meta` | 100 requests/minute |
-    | Stats API (all) | 100 requests/minute |
+    | Service | Endpoint | Limit |
+    |---------|----------|-------|
+    | Stats API | All endpoints | 100 requests/minute |
+    | Dota2 Meta | `/dota2-meta` | 100 requests/minute |
+    | Orchestrator | `/analyze` | 10 requests/minute |
+    | Orchestrator | `/analyze-bulk` | 2 requests/minute |
+    | Orchestrator | `/status/*` | 60 requests/minute |
+    | Orchestrator | `/public-check` | 30 requests/minute |
 
   version: 1.0.0
   contact:
@@ -46,22 +65,36 @@ info:
 
 servers:
   - url: https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev
-    description: Stats API - Development
+    description: Stats API (Dev) - Player Stats, Legacy endpoints
+  - url: https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/dota2-meta-dev
+    description: Dota2 Meta (Dev) - Meta Data endpoints
   - url: https://dev.mentoroid.ai
-    description: Orchestrator - Development
+    description: Orchestrator (Dev) - Analysis endpoints
 
 security:
   - ApiKeyAuth: []
 
 tags:
   - name: Player Stats
-    description: Player statistics and match history
+    description: |
+      Player statistics and match history.
+
+      **Base URL:** `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev` (Stats API)
   - name: Meta Data
-    description: Game meta data and hero recommendations
+    description: |
+      Game meta data and hero recommendations.
+
+      **Base URL:** `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/dota2-meta-dev` (Cloud Function)
   - name: Analysis
-    description: Match analysis workflow triggers
+    description: |
+      Match analysis workflow triggers.
+
+      **Base URL:** `https://dev.mentoroid.ai` (Orchestrator)
   - name: Legacy
-    description: Deprecated endpoints - use newer alternatives
+    description: |
+      Deprecated endpoints - use newer alternatives.
+
+      **Base URL:** `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev` (Stats API)
 
 paths:
   # ============================================================================
