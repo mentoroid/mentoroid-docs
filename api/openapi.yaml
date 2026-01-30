@@ -803,6 +803,9 @@ paths:
   # ============================================================================
 
   /dota2-meta:
+    servers:
+      - url: https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/dota2-meta-dev
+        description: Dota2 Meta (Dev)
     get:
       tags:
         - Meta Data
