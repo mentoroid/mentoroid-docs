@@ -12,6 +12,7 @@ info:
     |---------|------|---------|
     | **Stats API** | Cloud Function | Read-only player stats (`/player/*`, `/stats/*`) |
     | **Dota2 Meta** | Cloud Function | Meta heroes and coaching data (`/dota2-meta`) |
+    | **Public Check** | Cloud Function | Check if player data is public (`/public-check`) |
     | **Orchestrator** | Cloud Run | Analysis triggers (`/analyze`, `/status/*`) |
 
     ## Base URLs
@@ -29,6 +30,12 @@ info:
     |-------------|----------|
     | Dev | `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/dota2-meta-dev` |
     | Prod | `https://asia-southeast1-mentoroid-app.cloudfunctions.net/dota2-meta` |
+
+    ### Public Check (Privacy Check)
+    | Environment | Base URL |
+    |-------------|----------|
+    | Dev | `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/public-check-dev` |
+    | Prod | `https://asia-southeast1-mentoroid-app.cloudfunctions.net/public-check` |
 
     ### Orchestrator (Analysis)
     | Environment | Base URL |
@@ -51,10 +58,10 @@ info:
     |---------|----------|-------|
     | Stats API | All endpoints | 100 requests/minute |
     | Dota2 Meta | `/dota2-meta` | 100 requests/minute |
+    | Public Check | `/public-check` | 30 requests/minute |
     | Orchestrator | `/analyze` | 10 requests/minute |
     | Orchestrator | `/analyze-bulk` | 2 requests/minute |
     | Orchestrator | `/status/*` | 60 requests/minute |
-    | Orchestrator | `/public-check` | 30 requests/minute |
 
   version: 1.0.0
   contact:
@@ -68,6 +75,8 @@ servers:
     description: Stats API (Dev) - Player Stats, Legacy endpoints
   - url: https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/dota2-meta-dev
     description: Dota2 Meta (Dev) - Meta Data endpoints
+  - url: https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/public-check-dev
+    description: Public Check (Dev) - Privacy check endpoint
   - url: https://dev.mentoroid.ai
     description: Orchestrator (Dev) - Analysis endpoints
 
@@ -85,6 +94,11 @@ tags:
       Game meta data and hero recommendations.
 
       **Base URL:** `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/dota2-meta-dev` (Cloud Function)
+  - name: Public Check
+    description: |
+      Check if player match data is publicly accessible.
+
+      **Base URL:** `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/public-check-dev` (Cloud Function)
   - name: Analysis
     description: |
       Match analysis workflow triggers.
@@ -1099,7 +1113,7 @@ paths:
         description: Public Check API - Development
     get:
       tags:
-        - Player Stats
+        - Public Check
       summary: Check if player data is public
       description: |
         Checks if a player has "Expose Public Match Data" enabled in their Dota 2 settings.
