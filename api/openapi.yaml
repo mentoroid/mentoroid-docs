@@ -34,6 +34,7 @@ info:
     | `/analyze-bulk` | 2 requests/minute |
     | `/public-check` | 30 requests/minute |
     | `/status/*` | 60 requests/minute |
+    | `/dota2-meta` | 100 requests/minute |
     | Stats API (all) | 100 requests/minute |
 
   version: 1.0.0
@@ -55,6 +56,8 @@ security:
 tags:
   - name: Player Stats
     description: Player statistics and match history
+  - name: Meta Data
+    description: Game meta data and hero recommendations
   - name: Analysis
     description: Match analysis workflow triggers
   - name: Legacy
@@ -743,6 +746,162 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: No data found for player
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================================
+  # Meta Data Endpoints
+  # ============================================================================
+
+  /dota2-meta:
+    get:
+      tags:
+        - Meta Data
+      summary: Get Dota 2 meta heroes and coaching data
+      description: |
+        Returns current meta hero recommendations combined with coach-specific guidelines.
+
+        This endpoint provides:
+        - **Meta heroes** by role (carry, mid, offlane, soft_support, hard_support)
+        - **Coaching data** including heroes to avoid and low-rank alternatives
+        - **Rank-based filtering** for personalized recommendations
+
+        ## Query Parameter Combinations
+
+        | Parameters | Behavior |
+        |------------|----------|
+        | None | Returns all meta heroes and coaching data |
+        | `selected_role` | Returns data for specific role only |
+        | `selected_role` + `player_rank` | Filters heroes based on rank (removes heroes_to_avoid for low ranks) |
+        | `player_rank` only | Filters all roles based on rank |
+        | `no_coach=true` | Returns raw meta heroes without coach filtering |
+
+        ## Rank-Based Filtering
+
+        Players below rank 50 (Legend) are considered "low rank". For low-rank players:
+        1. Heroes in `heroes_to_avoid` are removed from recommendations
+        2. If needed, `low_rank_alternates` are added to maintain 5 hero recommendations
+
+      operationId: getDota2Meta
+      parameters:
+        - name: selected_role
+          in: query
+          description: |
+            Filter by role. Accepts position numbers (1-5) or role names.
+
+            | Position | Role Name |
+            |----------|-----------|
+            | 1 | carry |
+            | 2 | mid |
+            | 3 | offlane |
+            | 4 | soft_support |
+            | 5 | hard_support |
+          schema:
+            type: string
+            example: "carry"
+        - name: player_rank
+          in: query
+          description: |
+            Player's rank tier (0-80). Used for rank-based hero filtering.
+
+            - Ranks 0-49: Low rank (Legend and below) - applies filtering
+            - Ranks 50-80: High rank - no filtering applied
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 80
+            example: 35
+        - name: no_coach
+          in: query
+          description: |
+            Skip coach-specific filtering. Returns only raw meta heroes.
+
+            Accepts: `true`, `1`, `yes` (case-insensitive)
+          schema:
+            type: string
+            enum: ["true", "false", "1", "0", "yes", "no"]
+            example: "false"
+      responses:
+        '200':
+          description: Meta data retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dota2MetaResponse'
+              examples:
+                noFilters:
+                  summary: No filters - all data
+                  value:
+                    game: "dota2"
+                    version: "7.39"
+                    updated_at: "2026-01-29T10:30:00Z"
+                    data_available: true
+                    meta_heroes:
+                      carry: ["67", "42", "104", "81", "51"]
+                      mid: ["42", "104", "81", "33", "8"]
+                      offlane: ["104", "81", "51", "99", "23"]
+                      soft_support: ["33", "8", "41", "99", "100"]
+                      hard_support: ["41", "99", "100", "5", "31"]
+                    coaching_data:
+                      pasoll:
+                        heroes_to_avoid:
+                          carry: ["67", "42"]
+                          mid: ["104"]
+                        low_rank_alternates:
+                          carry: ["10", "11"]
+                          mid: ["8", "33"]
+                withRoleAndRank:
+                  summary: With selected_role and player_rank
+                  value:
+                    game: "dota2"
+                    version: "7.39"
+                    updated_at: "2026-01-29T10:30:00Z"
+                    selected_role: "carry"
+                    player_rank: 35
+                    data_available: true
+                    meta_heroes:
+                      carry: ["104", "81", "51", "10", "11"]
+                noCoach:
+                  summary: With no_coach=true
+                  value:
+                    game: "dota2"
+                    version: "7.39"
+                    updated_at: "2026-01-29T10:30:00Z"
+                    selected_role: "carry"
+                    no_coach: true
+                    data_available: true
+                    meta_heroes:
+                      carry: ["67", "42", "104", "81", "51"]
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalidRole:
+                  summary: Invalid role
+                  value:
+                    error: "Invalid selected_role: 'support'. Use 1-5 or carry/mid/offlane/soft_support/hard_support."
+                invalidRank:
+                  summary: Invalid rank
+                  value:
+                    error: "Invalid player_rank: 100. Must be between 0 and 80."
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before retrying
           content:
             application/json:
               schema:
@@ -1579,6 +1738,80 @@ components:
         report_url:
           type: string
           nullable: true
+
+    # -------------------------------------------------------------------------
+    # Meta Data Schemas
+    # -------------------------------------------------------------------------
+
+    Dota2MetaResponse:
+      type: object
+      description: Dota 2 meta heroes and coaching data response
+      properties:
+        game:
+          type: string
+          description: Game identifier
+          example: "dota2"
+        version:
+          type: string
+          description: Current game patch version
+          example: "7.39"
+        updated_at:
+          type: string
+          format: date-time
+          description: When the meta data was last updated
+          nullable: true
+        data_available:
+          type: boolean
+          description: Whether meta data is available
+        selected_role:
+          type: string
+          description: The requested role filter (if provided)
+          enum: [carry, mid, offlane, soft_support, hard_support]
+        player_rank:
+          type: integer
+          description: The requested player rank (if provided)
+          minimum: 0
+          maximum: 80
+        no_coach:
+          type: boolean
+          description: Whether coach filtering was skipped
+        meta_heroes:
+          type: object
+          description: |
+            Meta heroes by role. Keys are role names, values are arrays of hero IDs (strings).
+            Always returns a dict structure for consistent API contract.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+              description: Hero ID (string format)
+          example:
+            carry: ["67", "42", "104", "81", "51"]
+            mid: ["42", "104", "81", "33", "8"]
+        coaching_data:
+          type: object
+          description: Coach-specific hero recommendations (only included when not filtering by rank)
+          additionalProperties:
+            $ref: '#/components/schemas/CoachData'
+
+    CoachData:
+      type: object
+      description: Coach-specific hero guidelines
+      properties:
+        heroes_to_avoid:
+          type: object
+          description: Heroes that low-rank players should avoid, by role
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        low_rank_alternates:
+          type: object
+          description: Alternative heroes for low-rank players, by role
+          additionalProperties:
+            type: array
+            items:
+              type: string
 
     Error:
       type: object
