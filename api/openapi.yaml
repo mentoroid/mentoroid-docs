@@ -166,11 +166,36 @@ paths:
                   total_losses: 19
                   win_rate: 59.6
                   average_mentoroid_score: 72
-                  most_played_role: "Position 4"
+                  most_played_role: "Soft Support"
                   role_distribution:
-                    "Position 4": 25
-                    "Position 5": 12
-                    "Carry": 10
+                    "Soft Support":
+                      games: 25
+                      percentage: 53.19
+                      win_rate: 64.0
+                      heroes:
+                        - hero_id: 14
+                          games_played: 15
+                          win_rate: 66.67
+                          avg_gpm: 312.5
+                          avg_xpm: 445.2
+                          avg_kills: 5.2
+                          avg_deaths: 4.1
+                          avg_assists: 18.3
+                          avg_net_worth: 12500.0
+                          avg_last_hits: 45.2
+                          avg_denies: 3.1
+                          avg_hero_damage: 15200.5
+                          avg_tower_damage: 850.0
+                    "Hard Support":
+                      games: 12
+                      percentage: 25.53
+                      win_rate: 58.33
+                      heroes: []
+                    "Carry":
+                      games: 10
+                      percentage: 21.28
+                      win_rate: 50.0
+                      heroes: []
                 recent_matches:
                   - match_id: "8577546204"
                     hero_name: "Pudge"
@@ -1346,8 +1371,87 @@ components:
           type: string
         role_distribution:
           type: object
+          description: |
+            Role distribution with win rates calculated at the backend.
+            Keys are role names (Carry, Mid, Offlane, Soft Support, Hard Support).
           additionalProperties:
-            type: integer
+            $ref: '#/components/schemas/RoleStats'
+
+    RoleStats:
+      type: object
+      description: Statistics for a specific role
+      properties:
+        games:
+          type: integer
+          description: Total games played in this role
+        percentage:
+          type: number
+          format: float
+          description: Percentage of total matches played in this role
+        win_rate:
+          type: number
+          format: float
+          description: Win rate percentage for this role (calculated at backend)
+        heroes:
+          type: array
+          description: Heroes played in this role, sorted by games_played descending
+          items:
+            $ref: '#/components/schemas/RoleHeroStats'
+
+    RoleHeroStats:
+      type: object
+      description: Statistics for a hero within a specific role
+      properties:
+        hero_id:
+          type: integer
+          description: Dota 2 hero ID
+        games_played:
+          type: integer
+          description: Number of games played with this hero in this role
+        win_rate:
+          type: number
+          format: float
+          description: Win rate percentage for this hero in this role
+        avg_gpm:
+          type: number
+          format: float
+          description: Average gold per minute
+        avg_xpm:
+          type: number
+          format: float
+          description: Average experience per minute
+        avg_kills:
+          type: number
+          format: float
+          description: Average kills per game
+        avg_deaths:
+          type: number
+          format: float
+          description: Average deaths per game
+        avg_assists:
+          type: number
+          format: float
+          description: Average assists per game
+        avg_net_worth:
+          type: number
+          format: float
+          description: Average final net worth
+        avg_last_hits:
+          type: number
+          format: float
+          description: Average last hits per game
+        avg_denies:
+          type: number
+          format: float
+          description: Average denies per game
+        avg_hero_damage:
+          type: number
+          format: float
+          description: Average hero damage dealt
+        avg_tower_damage:
+          type: number
+          format: float
+          description: Average tower damage dealt
 
     MatchSummary:
       type: object
