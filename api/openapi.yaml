@@ -261,6 +261,16 @@ paths:
                         avg_denies: 3.1
                         avg_hero_damage: 15200.5
                         avg_tower_damage: 850.0
+                  "Hard Support":
+                    games: 12
+                    percentage: 25.53
+                    win_rate: 58.33
+                    heroes: []
+                  "Carry":
+                    games: 10
+                    percentage: 21.28
+                    win_rate: 50.0
+                    heroes: []
                 match_trends:
                   - match_id: "8577546204"
                     hero_id: 14
@@ -2359,6 +2369,13 @@ components:
           type: number
           format: float
           description: Average tower damage dealt
+        role_distribution:
+          type: object
+          description: |
+            Role distribution with win rates calculated at the backend.
+            Keys are role names (Carry, Mid, Offlane, Soft Support, Hard Support).
+          additionalProperties:
+            $ref: '#/components/schemas/RoleStats'
 
     MatchTrend:
       type: object
