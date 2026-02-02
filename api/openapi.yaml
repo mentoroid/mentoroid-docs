@@ -121,10 +121,20 @@ paths:
         - Player Stats
       summary: Get player profile
       description: |
-        Returns the player profile including aggregated statistics and recent matches.
+        Returns the player profile including aggregated statistics, AI insights, and match history.
 
-        The profile contains pre-computed stats from PGA (Post-Game Analysis) results
-        including Mentoroid scores, role distribution, and win rates.
+        The profile combines two data sources:
+        1. **Quantitative stats** from PGA (Post-Game Analysis) results
+        2. **AI insights** from LLM-generated performance analysis
+
+        Includes:
+        - **overview_summary**: Total matches, wins/losses, win rate, streak
+        - **mentoroid_metrics**: Average and latest Mentoroid scores
+        - **ai_insights**: Performance summary, strengths, areas to improve
+        - **faction_winrates**: Radiant vs Dire statistics
+        - **most_played_heroes**: Top 5 heroes with roles and detailed stats
+        - **role_distribution**: Breakdown by role with win rates (calculated at backend)
+        - **match_trends**: Recent match history (optional)
       operationId: getPlayerProfile
       parameters:
         - name: steam_id
@@ -137,18 +147,19 @@ paths:
             example: "76561198432333227"
         - name: include_matches
           in: query
-          description: Include recent matches in response
+          description: Include match_trends in response
           schema:
             type: boolean
             default: true
         - name: match_limit
           in: query
-          description: Number of recent matches to include (max 100)
+          description: |
+            Limit number of matches in match_trends. If not specified, returns all matches.
+            Maximum 100.
           schema:
             type: integer
             minimum: 1
             maximum: 100
-            default: 20
       responses:
         '200':
           description: Player profile found
@@ -157,33 +168,84 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlayerProfile'
               example:
-                steam_id: "76561198432333227"
-                total_matches_analyzed: 47
-                total_matches_available: 47
-                last_updated: "2025-12-11T10:30:00Z"
-                stats:
+                player_steam_id: 76561198432333227
+                player_name: "PlayerOne"
+                player_photo: "https://avatars.steamstatic.com/abc123.jpg"
+                rank_info: 65
+                overview_summary:
+                  total_matches_analyzed: 47
                   total_wins: 28
                   total_losses: 19
-                  win_rate: 59.6
-                  average_mentoroid_score: 72
-                  most_played_role: "Position 4"
-                  role_distribution:
-                    "Position 4": 25
-                    "Position 5": 12
-                    "Carry": 10
-                recent_matches:
+                  win_rate_percentage: 59.57
+                  avg_game_duration_formatted: "38:45"
+                  current_streak: "W3"
+                  last_match_date: 1702459800
+                mentoroid_metrics:
+                  avg_mentoroid_score: 72.5
+                  last_mentoroid_score: 75
+                ai_insights:
+                  performance_summary: "Strong support player with excellent vision control."
+                  strengths:
+                    - "High kill participation in teamfights"
+                    - "Consistent ward placement"
+                  areas_to_improve:
+                    - "Early game deaths could be reduced"
+                faction_winrates:
+                  radiant:
+                    games: 25
+                    wins: 16
+                    win_rate_percentage: 64.0
+                  dire:
+                    games: 22
+                    wins: 12
+                    win_rate_percentage: 54.55
+                most_played_heroes:
+                  - hero: "Pudge"
+                    hero_id: 14
+                    attack_type: "melee"
+                    games_played: 15
+                    win_rate: 66.67
+                    avg_mentoroid_score: 72.5
+                    roles: ["Soft Support", "Offlane"]
+                    avg_k: 5.2
+                    avg_d: 4.1
+                    avg_a: 18.3
+                    kda: "5.2/4.1/18.3"
+                    avg_last_hits: 45.2
+                    avg_denies: 3.1
+                    avg_gpm: 312.5
+                    avg_xpm: 445.2
+                    avg_net_worth: 12500.0
+                    avg_hero_damage: 15200.5
+                    avg_tower_damage: 850.0
+                role_distribution:
+                  "Soft Support":
+                    games: 25
+                    percentage: 53.19
+                    win_rate: 64.0
+                    heroes:
+                      - hero_id: 14
+                        games_played: 15
+                        win_rate: 66.67
+                        avg_gpm: 312.5
+                        avg_xpm: 445.2
+                        avg_kills: 5.2
+                        avg_deaths: 4.1
+                        avg_assists: 18.3
+                        avg_net_worth: 12500.0
+                        avg_last_hits: 45.2
+                        avg_denies: 3.1
+                        avg_hero_damage: 15200.5
+                        avg_tower_damage: 850.0
+                match_trends:
                   - match_id: "8577546204"
-                    hero_name: "Pudge"
                     hero_id: 14
                     mentoroid_score: 75
                     result: "Win"
-                    role: "Position 4"
-                    kills: 5
-                    deaths: 3
-                    assists: 22
                     gpm: 312
                     xpm: 445
-                    analyzed_at: "2025-12-11T10:30:00Z"
+                    start_time: 1702459800
+                total_matches_available: 47
         '400':
           description: Invalid steam_id format
           content:
@@ -1308,46 +1370,335 @@ components:
   schemas:
     PlayerProfile:
       type: object
+      description: |
+        Complete player profile combining quantitative PGA stats and AI-generated insights.
       properties:
-        steam_id:
-          type: string
-          description: Steam 64-bit ID
-        total_matches_analyzed:
+        player_steam_id:
           type: integer
-          description: Number of matches with PGA analysis
+          format: int64
+          description: Steam 64-bit ID as integer
+        player_name:
+          type: string
+          description: Player's Steam display name
+        player_photo:
+          type: string
+          format: uri
+          description: URL to player's Steam avatar
+        rank_info:
+          type: integer
+          minimum: 0
+          maximum: 80
+          description: |
+            Player's rank tier (0-80).
+            - 0-9: Herald
+            - 10-19: Guardian
+            - 20-29: Crusader
+            - 30-39: Archon
+            - 40-49: Legend
+            - 50-59: Ancient
+            - 60-69: Divine
+            - 70-80: Immortal
+        overview_summary:
+          $ref: '#/components/schemas/OverviewSummary'
+        mentoroid_metrics:
+          $ref: '#/components/schemas/MentoroidMetrics'
+        ai_insights:
+          $ref: '#/components/schemas/AiInsights'
+        faction_winrates:
+          $ref: '#/components/schemas/FactionWinrates'
+        most_played_heroes:
+          type: array
+          description: Top 5 most played heroes with detailed stats and roles
+          maxItems: 5
+          items:
+            $ref: '#/components/schemas/MostPlayedHero'
+        role_distribution:
+          type: object
+          description: |
+            Role distribution with win rates calculated at the backend.
+            Keys are role names (Carry, Mid, Offlane, Soft Support, Hard Support).
+          additionalProperties:
+            $ref: '#/components/schemas/RoleStats'
+        match_trends:
+          type: array
+          description: Recent match history (included when include_matches=true)
+          items:
+            $ref: '#/components/schemas/MatchTrend'
         total_matches_available:
           type: integer
-          description: Total matches stored in profile
-        last_updated:
-          type: string
-          format: date-time
-          nullable: true
-        stats:
-          $ref: '#/components/schemas/ProfileStats'
-        recent_matches:
-          type: array
-          items:
-            $ref: '#/components/schemas/MatchSummary'
+          description: Total number of matches in match_trends (before any limit applied)
 
-    ProfileStats:
+    OverviewSummary:
       type: object
+      description: High-level player statistics
       properties:
+        total_matches_analyzed:
+          type: integer
+          description: Number of matches with PGA analysis completed
         total_wins:
           type: integer
         total_losses:
           type: integer
+        win_rate_percentage:
+          type: number
+          format: float
+          description: Win rate as percentage (0-100)
+        avg_game_duration_formatted:
+          type: string
+          description: Average game duration in "MM:SS" format
+          example: "38:45"
+        current_streak:
+          type: string
+          description: |
+            Current win/loss streak. Format: "W3" (3 wins), "L2" (2 losses), "N/A" (no data)
+          example: "W3"
+        last_match_date:
+          type: integer
+          nullable: true
+          description: Unix timestamp of most recent match
+
+    MentoroidMetrics:
+      type: object
+      description: Mentoroid score metrics
+      properties:
+        avg_mentoroid_score:
+          type: number
+          format: float
+          nullable: true
+          description: Average Mentoroid score across all analyzed matches (0-100). Null if no PGA data.
+        last_mentoroid_score:
+          type: number
+          format: float
+          nullable: true
+          description: Mentoroid score from most recent analyzed match. Null if no PGA data.
+
+    AiInsights:
+      type: object
+      description: AI-generated performance insights from LLM analysis
+      properties:
+        performance_summary:
+          type: string
+          description: Brief narrative summary of player's performance
+        strengths:
+          type: array
+          description: List of identified player strengths
+          items:
+            type: string
+        areas_to_improve:
+          type: array
+          description: List of areas where player can improve
+          items:
+            type: string
+
+    FactionWinrates:
+      type: object
+      description: Win rates broken down by faction (Radiant vs Dire)
+      properties:
+        radiant:
+          $ref: '#/components/schemas/FactionStats'
+        dire:
+          $ref: '#/components/schemas/FactionStats'
+
+    FactionStats:
+      type: object
+      description: Statistics for a single faction
+      properties:
+        games:
+          type: integer
+          description: Total games played on this faction
+        wins:
+          type: integer
+          description: Games won on this faction
+        win_rate_percentage:
+          type: number
+          format: float
+          description: Win rate percentage (0-100)
+
+    MostPlayedHero:
+      type: object
+      description: Statistics for a frequently played hero
+      properties:
+        hero:
+          type: string
+          description: Hero name
+          example: "Pudge"
+        hero_id:
+          type: integer
+          description: Dota 2 hero ID
+        attack_type:
+          type: string
+          enum: ["melee", "ranged"]
+          description: Hero attack type
+        games_played:
+          type: integer
+          description: Number of games played with this hero
         win_rate:
           type: number
           format: float
-        average_mentoroid_score:
+          description: Win rate percentage (0-100)
+        avg_mentoroid_score:
           type: number
           format: float
-        most_played_role:
+          nullable: true
+          description: Average Mentoroid score with this hero. Null if no PGA data.
+        roles:
+          type: array
+          description: |
+            Roles this hero was played in, sorted by games played (most to least).
+            Maximum 5 roles. Values: Carry, Mid, Offlane, Soft Support, Hard Support.
+          maxItems: 5
+          items:
+            type: string
+            enum: ["Carry", "Mid", "Offlane", "Soft Support", "Hard Support"]
+        avg_k:
+          type: number
+          format: float
+          description: Average kills per game
+        avg_d:
+          type: number
+          format: float
+          description: Average deaths per game
+        avg_a:
+          type: number
+          format: float
+          description: Average assists per game
+        kda:
           type: string
-        role_distribution:
-          type: object
-          additionalProperties:
-            type: integer
+          description: KDA ratio as formatted string "K/D/A"
+          example: "5.2/4.1/18.3"
+        avg_last_hits:
+          type: number
+          format: float
+          description: Average last hits per game
+        avg_denies:
+          type: number
+          format: float
+          description: Average denies per game
+        avg_gpm:
+          type: number
+          format: float
+          description: Average gold per minute
+        avg_xpm:
+          type: number
+          format: float
+          description: Average experience per minute
+        avg_net_worth:
+          type: number
+          format: float
+          description: Average final net worth
+        avg_hero_damage:
+          type: number
+          format: float
+          description: Average hero damage dealt
+        avg_tower_damage:
+          type: number
+          format: float
+          description: Average tower damage dealt
+
+    MatchTrend:
+      type: object
+      description: Summary of a single match for trend display
+      properties:
+        match_id:
+          type: string
+          description: Dota 2 match ID
+        hero_id:
+          type: integer
+          description: Hero played in this match
+        mentoroid_score:
+          type: number
+          format: float
+          nullable: true
+          description: Mentoroid score for this match. Null if PGA not completed.
+        result:
+          type: string
+          enum: ["Win", "Won", "Loss", "Lost"]
+          description: Match result
+        gpm:
+          type: integer
+          description: Gold per minute
+        xpm:
+          type: integer
+          description: Experience per minute
+        start_time:
+          type: integer
+          description: Unix timestamp of match start
+
+    RoleStats:
+      type: object
+      description: Statistics for a specific role
+      properties:
+        games:
+          type: integer
+          description: Total games played in this role
+        percentage:
+          type: number
+          format: float
+          description: Percentage of total matches played in this role
+        win_rate:
+          type: number
+          format: float
+          description: Win rate percentage for this role (calculated at backend)
+        heroes:
+          type: array
+          description: Heroes played in this role, sorted by games_played descending
+          items:
+            $ref: '#/components/schemas/RoleHeroStats'
+
+    RoleHeroStats:
+      type: object
+      description: Statistics for a hero within a specific role
+      properties:
+        hero_id:
+          type: integer
+          description: Dota 2 hero ID
+        games_played:
+          type: integer
+          description: Number of games played with this hero in this role
+        win_rate:
+          type: number
+          format: float
+          description: Win rate percentage for this hero in this role
+        avg_gpm:
+          type: number
+          format: float
+          description: Average gold per minute
+        avg_xpm:
+          type: number
+          format: float
+          description: Average experience per minute
+        avg_kills:
+          type: number
+          format: float
+          description: Average kills per game
+        avg_deaths:
+          type: number
+          format: float
+          description: Average deaths per game
+        avg_assists:
+          type: number
+          format: float
+          description: Average assists per game
+        avg_net_worth:
+          type: number
+          format: float
+          description: Average final net worth
+        avg_last_hits:
+          type: number
+          format: float
+          description: Average last hits per game
+        avg_denies:
+          type: number
+          format: float
+          description: Average denies per game
+        avg_hero_damage:
+          type: number
+          format: float
+          description: Average hero damage dealt
+        avg_tower_damage:
+          type: number
+          format: float
+          description: Average tower damage dealt
 
     MatchSummary:
       type: object
