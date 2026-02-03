@@ -974,6 +974,9 @@ paths:
   # ============================================================================
 
   /signup:
+    servers:
+      - url: https://dev.mentoroid.ai
+        description: Orchestrator (Dev)
     post:
       tags:
         - User Registration
@@ -1077,6 +1080,9 @@ paths:
                 $ref: '#/components/schemas/Error'
 
   /update_match:
+    servers:
+      - url: https://dev.mentoroid.ai
+        description: Orchestrator (Dev)
     post:
       tags:
         - Match Data
