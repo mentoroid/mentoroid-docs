@@ -59,6 +59,8 @@ info:
     | Stats API | All endpoints | 100 requests/minute |
     | Dota2 Meta | `/dota2-meta` | 100 requests/minute |
     | Public Check | `/public-check` | 30 requests/minute |
+    | Orchestrator | `/signup` | 5 requests/minute |
+    | Orchestrator | `/update_match` | 30 requests/minute |
     | Orchestrator | `/analyze` | 10 requests/minute |
     | Orchestrator | `/analyze-bulk` | 2 requests/minute |
     | Orchestrator | `/status/*` | 60 requests/minute |
@@ -99,6 +101,16 @@ tags:
       Check if player match data is publicly accessible.
 
       **Base URL:** `https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/public-check-dev` (Cloud Function)
+  - name: User Registration
+    description: |
+      User signup and registration endpoints.
+
+      **Base URL:** `https://dev.mentoroid.ai` (Orchestrator)
+  - name: Match Data
+    description: |
+      Live match data submission from Binary client.
+
+      **Base URL:** `https://dev.mentoroid.ai` (Orchestrator)
   - name: Analysis
     description: |
       Match analysis workflow triggers.
@@ -960,6 +972,198 @@ paths:
   # ============================================================================
   # Orchestrator Endpoints
   # ============================================================================
+
+  /signup:
+    post:
+      tags:
+        - User Registration
+      summary: First-time user registration (Path A)
+      description: |
+        Creates a new user manifest, fetches match history from Steam API (last 14 days),
+        and queues matches for batch PGA processing.
+
+        **Important:** This endpoint is for first-time users only. If the user already
+        exists (manifest found), returns 409 Conflict.
+
+        **Flow:**
+        1. Validates steam_id format
+        2. Checks if user manifest already exists
+        3. Fetches match history from Steam API (last 14 days, max 100 matches)
+        4. Filters for Ranked All Pick matches only (game_mode=22, lobby_type=7)
+        5. Creates user manifest with match data
+        6. Publishes batch to `pga-trigger` topic for PGA processing
+        7. Generates initial profile from WebAPI stats
+
+        **Rate Limit:** 5 requests/minute
+      operationId: signup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - steam_id
+              properties:
+                steam_id:
+                  type: string
+                  description: Steam 64-bit ID (17 digits starting with 7656)
+                  pattern: '^7656\d{13}$'
+                  example: "76561198432333227"
+            example:
+              steam_id: "76561198432333227"
+      responses:
+        '200':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignupResponse'
+              example:
+                status: "success"
+                message: "User registered, processing historical matches"
+                steam_id: "76561198432333227"
+                matches_found: 15
+                matches_added: 15
+        '400':
+          description: Invalid request (bad steam_id, no matches found, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missing_steam_id:
+                  summary: Missing steam_id
+                  value:
+                    error: "Missing steam_id"
+                invalid_format:
+                  summary: Invalid steam_id format
+                  value:
+                    error: "Invalid steam_id format"
+                no_ranked_matches:
+                  summary: No Ranked All Pick matches found
+                  value:
+                    status: "error"
+                    error: "No Ranked All Pick matches found. Only Ranked All Pick matches are supported."
+                    steam_id: "76561198432333227"
+                    matches_found: 0
+                    skipped_matches:
+                      total: 8
+                      by_lobby_type:
+                        "Battle Cup": 3
+                        "Normal": 5
+                      by_game_mode: {}
+                no_recent_matches:
+                  summary: No matches in last 14 days
+                  value:
+                    status: "error"
+                    error: "No matches found in the last 14 days. Please play at least one match before signing up."
+                    steam_id: "76561198432333227"
+                    matches_found: 0
+        '409':
+          description: User already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "User already registered"
+                steam_id: "76561198432333227"
+        '500':
+          description: Server error (Steam API key not configured, save failed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /update_match:
+    post:
+      tags:
+        - Match Data
+      summary: Receive live match data (Path B)
+      description: |
+        Receives match data from the Binary client after a game ends.
+        Adds the match to the user's manifest and queues it for PGA processing.
+
+        **Important:** The user must have signed up first (manifest must exist).
+        If no manifest is found, returns 404.
+
+        **Flow:**
+        1. Validates all required fields
+        2. Checks if user manifest exists
+        3. Adds match to manifest with `coached: true` and `status: "pending"`
+        4. Publishes to `pga-trigger` topic for single match PGA processing
+
+        **Rate Limit:** 30 requests/minute
+
+        **Idempotency:** If the same match_id is sent twice, returns success
+        without creating a duplicate entry.
+      operationId: updateMatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MatchDataRequest'
+            example:
+              steam_id: "76561198076693960"
+              match_id: "8672391485"
+              hero_id: 108
+              hero_name: "Underlord"
+              is_radiant: false
+              result: "Won"
+              duration_seconds: 2755
+              start_time: 1769941500
+              net_worth: 32000
+              gold: 24288
+              xpm: 633
+              gpm: 528
+              last_hits: 337
+              denies: 18
+              kills: 11
+              deaths: 10
+              assists: 11
+      responses:
+        '200':
+          description: Match received and queued for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchReceivedResponse'
+              example:
+                status: "success"
+                message: "Match received and queued for processing"
+                match_id: "8672391485"
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Missing required fields"
+                  missing:
+                    type: array
+                    items:
+                      type: string
+                    example: ["hero_id", "result"]
+        '404':
+          description: User not registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "User not registered. Please call /signup first."
+                steam_id: "76561198076693960"
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /analyze:
     post:
@@ -1862,6 +2066,152 @@ components:
             type: array
             items:
               type: string
+
+    SignupResponse:
+      type: object
+      description: Response from /signup endpoint
+      properties:
+        status:
+          type: string
+          enum: ["success", "error"]
+          description: Status of the signup request
+        message:
+          type: string
+          description: Human-readable message
+        steam_id:
+          type: string
+          description: Steam 64-bit ID
+        matches_found:
+          type: integer
+          description: Number of matches found in last 14 days
+        matches_added:
+          type: integer
+          description: Number of matches added to manifest
+        skipped_matches:
+          type: object
+          description: Breakdown of skipped non-ranked matches (only present if any were skipped)
+          properties:
+            total:
+              type: integer
+              description: Total number of skipped matches
+            by_lobby_type:
+              type: object
+              description: Count of skipped matches by lobby type (e.g., "Battle Cup", "Normal")
+              additionalProperties:
+                type: integer
+            by_game_mode:
+              type: object
+              description: Count of skipped matches by game mode (e.g., "Captains Mode", "Turbo")
+              additionalProperties:
+                type: integer
+
+    MatchDataRequest:
+      type: object
+      description: Live match data from Binary client
+      required:
+        - steam_id
+        - match_id
+        - hero_id
+        - hero_name
+        - is_radiant
+        - result
+        - duration_seconds
+        - start_time
+        - net_worth
+        - gold
+        - xpm
+        - gpm
+        - last_hits
+        - denies
+        - kills
+        - deaths
+        - assists
+      properties:
+        steam_id:
+          type: string
+          description: Steam 64-bit ID
+          example: "76561198076693960"
+        match_id:
+          type: string
+          description: Dota 2 match ID
+          example: "8672391485"
+        hero_id:
+          type: integer
+          description: Hero ID (1-138)
+          example: 108
+        hero_name:
+          type: string
+          description: Hero name
+          example: "Underlord"
+        is_radiant:
+          type: boolean
+          description: Whether player was on Radiant team
+          example: false
+        result:
+          type: string
+          description: Match result from player perspective
+          enum: ["Won", "Lost"]
+          example: "Won"
+        duration_seconds:
+          type: integer
+          description: Match duration in seconds
+          example: 2755
+        start_time:
+          type: integer
+          description: Unix timestamp of match start
+          example: 1769941500
+        net_worth:
+          type: integer
+          description: Final net worth
+          example: 32000
+        gold:
+          type: integer
+          description: Final gold
+          example: 24288
+        xpm:
+          type: integer
+          description: Experience per minute
+          example: 633
+        gpm:
+          type: integer
+          description: Gold per minute
+          example: 528
+        last_hits:
+          type: integer
+          description: Total last hits
+          example: 337
+        denies:
+          type: integer
+          description: Total denies
+          example: 18
+        kills:
+          type: integer
+          description: Total kills
+          example: 11
+        deaths:
+          type: integer
+          description: Total deaths
+          example: 10
+        assists:
+          type: integer
+          description: Total assists
+          example: 11
+
+    MatchReceivedResponse:
+      type: object
+      description: Response from /update_match endpoint
+      properties:
+        status:
+          type: string
+          enum: ["success"]
+          example: "success"
+        message:
+          type: string
+          example: "Match received and queued for processing"
+        match_id:
+          type: string
+          description: The match ID that was processed
+          example: "8672391485"
 
     Error:
       type: object
