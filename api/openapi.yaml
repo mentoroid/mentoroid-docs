@@ -866,13 +866,13 @@ paths:
         - name: player_rank
           in: query
           description: |
-            Player's rank tier (0-80). Used for rank-based hero filtering.
+            Player's rank tier (10-80). Used for rank-based hero filtering.
 
-            - Ranks 0-49: Low rank (Legend and below) - applies filtering
+            - Ranks 10-49: Low rank (Legend and below) - applies filtering
             - Ranks 50-80: High rank - no filtering applied
           schema:
             type: integer
-            minimum: 0
+            minimum: 10
             maximum: 80
             example: 35
         - name: no_coach
@@ -950,7 +950,7 @@ paths:
                 invalidRank:
                   summary: Invalid rank
                   value:
-                    error: "Invalid player_rank: 100. Must be between 0 and 80."
+                    error: "Invalid player_rank: 100. Must be between 10 and 80."
         '401':
           description: Missing or invalid API key
           content:
@@ -2030,7 +2030,7 @@ components:
         player_rank:
           type: integer
           description: The requested player rank (if provided)
-          minimum: 0
+          minimum: 10
           maximum: 80
         no_coach:
           type: boolean
