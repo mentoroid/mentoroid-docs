@@ -257,13 +257,30 @@ paths:
                 matches_found: 15
                 matches_added: 15
         '400':
-          description: Invalid steam_id format
+          description: Invalid request (bad steam_id, no ranked matches, etc.)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-              example:
-                error: "Invalid steam_id format"
+              examples:
+                invalid_format:
+                  summary: Invalid steam_id format
+                  value:
+                    error: "Invalid steam_id format"
+                no_ranked_matches:
+                  summary: No Ranked All Pick matches found - Profile NOT created
+                  value:
+                    status: "error"
+                    error: "No Ranked All Pick matches found. Only Ranked All Pick matches are supported."
+                    steam_id: "76561199813585151"
+                    matches_found: 0
+                    skipped_matches:
+                      total: 133
+                      by_game_mode: {}
+                      by_lobby_type:
+                        "Normal": 130
+                        "Co-op with AI": 1
+                        "Unknown(14)": 2
         '409':
           description: User already registered
           content:
