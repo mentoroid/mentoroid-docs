@@ -1044,18 +1044,19 @@ paths:
                   value:
                     error: "Invalid steam_id format"
                 no_ranked_matches:
-                  summary: No Ranked All Pick matches found
+                  summary: No Ranked All Pick matches found - Profile NOT created
                   value:
                     status: "error"
                     error: "No Ranked All Pick matches found. Only Ranked All Pick matches are supported."
-                    steam_id: "76561198432333227"
+                    steam_id: "76561199813585151"
                     matches_found: 0
                     skipped_matches:
-                      total: 8
-                      by_lobby_type:
-                        "Battle Cup": 3
-                        "Normal": 5
+                      total: 133
                       by_game_mode: {}
+                      by_lobby_type:
+                        "Normal": 130
+                        "Co-op with AI": 1
+                        "Unknown(14)": 2
                 no_recent_matches:
                   summary: No matches in last 14 days
                   value:
