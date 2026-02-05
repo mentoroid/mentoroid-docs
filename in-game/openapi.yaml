@@ -99,6 +99,8 @@ servers:
     description: Match Events (Flutter Server)
   - url: http://localhost:19151
     description: GSI Handler
+  - url: https://dev.mentoroid.ai
+    description: Mentoroid Orchestrator (Dev)
 
 tags:
   - name: Player Setup
@@ -111,6 +113,8 @@ tags:
     description: TTS voice pack selection and preview
   - name: Match Events (Flutter Server)
     description: Webhooks that Flutter must implement to receive match data
+  - name: Backend Events (Orchestrator)
+    description: Endpoints that Binary calls on Mentoroid Backend for PGA processing
 
 paths:
   /set_player:
@@ -589,6 +593,92 @@ paths:
               example:
                 status: ok
 
+  /session_end:
+    post:
+      tags: [Match Events (Flutter Server)]
+      summary: Session ended webhook
+      description: |
+        **Flutter must implement this endpoint.**
+        Called by the coaching backend when Dota 2 is closed (session ended).
+        Use this to update UI state, show session summary, or cleanup resources.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionEndRequest'
+            example:
+              status: "session_ended"
+      responses:
+        "200":
+          description: Acknowledge receipt
+          content:
+            application/json:
+              example:
+                status: ok
+
+  /update_match:
+    post:
+      tags: [Backend Events (Orchestrator)]
+      summary: Send match data to Orchestrator
+      description: |
+        **Binary calls this endpoint on Mentoroid Backend.**
+        Called by the coaching binary when a match ends. Sends match session data
+        to the Orchestrator for PGA (Post-Game Analysis) processing.
+
+        **Base URL:** `https://dev.mentoroid.ai`
+
+        **Authentication:** Requires `X-API-Key` header (from config.json)
+
+        **Note:** The backend automatically sets `coached: true` for matches
+        received via this endpoint (since they came from the Binary client).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMatchRequest'
+            example:
+              match_id: "8648059066"
+              steam_id: "76561198047160218"
+              hero_id: 35
+              is_radiant: true
+              result: "Won"
+              duration_seconds: 2145
+              start_time: 1736150521
+              net_worth: 20491
+              gold: 1250
+              xpm: 935
+              gpm: 692
+              last_hits: 61
+              denies: 5
+              kills: 8
+              deaths: 3
+              assists: 22
+      responses:
+        "200":
+          description: Match received and queued for PGA processing
+          content:
+            application/json:
+              example:
+                status: "success"
+                message: "Match received and queued for processing"
+                match_id: "8648059066"
+        "400":
+          description: Missing required fields
+          content:
+            application/json:
+              example:
+                error: "Missing required fields"
+                missing: ["hero_id", "steam_id"]
+        "404":
+          description: User not registered
+          content:
+            application/json:
+              example:
+                error: "User not registered. Please call /signup first."
+                steam_id: "76561198047160218"
+
 components:
   schemas:
     SetPlayerRequest:
@@ -873,6 +963,103 @@ components:
           example: "8648059066"
         session_data:
           $ref: '#/components/schemas/SessionData'
+
+    SessionEndRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          description: Session status
+          example: "session_ended"
+
+    UpdateMatchRequest:
+      type: object
+      description: Match data sent to Orchestrator for PGA processing
+      required:
+        - match_id
+        - steam_id
+        - hero_id
+        - is_radiant
+        - result
+        - duration_seconds
+        - start_time
+        - net_worth
+        - gold
+        - xpm
+        - gpm
+        - last_hits
+        - denies
+        - kills
+        - deaths
+        - assists
+      properties:
+        match_id:
+          type: string
+          description: Dota 2 match ID
+          example: "8648059066"
+        steam_id:
+          type: string
+          description: Player's Steam 64-bit ID
+          example: "76561198047160218"
+        hero_id:
+          type: integer
+          description: Dota 2 hero ID
+          example: 35
+        is_radiant:
+          type: boolean
+          description: True if player on Radiant, false if Dire
+          example: true
+        result:
+          type: string
+          enum: ["Won", "Lost"]
+          description: Match outcome
+          example: "Won"
+        duration_seconds:
+          type: integer
+          description: Match duration in seconds
+          example: 2145
+        start_time:
+          type: integer
+          description: Unix timestamp when match started
+          example: 1736150521
+        net_worth:
+          type: integer
+          description: Final networth in gold
+          example: 20491
+        gold:
+          type: integer
+          description: Current gold at match end
+          example: 1250
+        xpm:
+          type: integer
+          description: Experience per minute
+          example: 935
+        gpm:
+          type: integer
+          description: Gold per minute
+          example: 692
+        last_hits:
+          type: integer
+          description: Total last hits
+          example: 61
+        denies:
+          type: integer
+          description: Total denies
+          example: 5
+        kills:
+          type: integer
+          description: Total kills
+          example: 8
+        deaths:
+          type: integer
+          description: Total deaths
+          example: 3
+        assists:
+          type: integer
+          description: Total assists
+          example: 22
 
     SessionData:
       type: object
