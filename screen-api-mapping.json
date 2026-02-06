@@ -36,75 +36,11 @@
       ]
     }
   },
-  "_workflow": {
-    "description": "User data pipeline workflow endpoints (Pub/Sub architecture)",
-    "endpoints": [
-      {
-        "path": "/signup",
-        "method": "POST",
-        "description": "Path A: First-time user registration (bulk processing)",
-        "source": "workflow/openapi.yaml"
-      },
-      {
-        "path": "/match",
-        "method": "POST",
-        "description": "Path B: Live match from Binary client (single processing)",
-        "source": "workflow/openapi.yaml"
-      },
-      {
-        "path": "/user-manifest/{steam_id}",
-        "method": "GET",
-        "description": "Get user's manifest with processing status",
-        "source": "workflow/openapi.yaml"
-      },
-      {
-        "path": "/user-profile/{steam_id}",
-        "method": "GET",
-        "description": "Get user's generated profile",
-        "source": "workflow/openapi.yaml"
-      },
-      {
-        "path": "/user-history/{steam_id}",
-        "method": "GET",
-        "description": "Get user's match history",
-        "source": "workflow/openapi.yaml"
-      }
-    ],
-    "pubsub_topics": [
-      {
-        "name": "pga-trigger",
-        "publisher": "Orchestrator",
-        "subscriber": "PGA Trigger Service",
-        "purpose": "Initiate PGA processing"
-      },
-      {
-        "name": "match-analysis-queue",
-        "publisher": "PGA Trigger Service",
-        "subscriber": "Replay Fetcher",
-        "purpose": "Queue individual matches"
-      },
-      {
-        "name": "pga-results",
-        "publisher": "PGA Analyzer",
-        "subscriber": "Aggregate Service",
-        "purpose": "Analysis completion"
-      },
-      {
-        "name": "pga-aggregation-complete",
-        "publisher": "Aggregate Service",
-        "subscriber": "Profile Generator",
-        "purpose": "All matches processed"
-      }
-    ]
-  },
   "_internal": {
     "description": "Internal APIs - not synced to Notion",
     "endpoints": [
       "POST /start (in-game/openapi.yaml)",
-      "POST /stop (in-game/openapi.yaml)",
-      "POST /internal/pga-trigger (workflow/openapi.yaml)",
-      "POST /internal/aggregate (workflow/openapi.yaml)",
-      "POST /internal/profile-generator (workflow/openapi.yaml)"
+      "POST /stop (in-game/openapi.yaml)"
     ]
   },
   "_unmapped": {
