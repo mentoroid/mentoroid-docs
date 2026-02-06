@@ -1,0 +1,29 @@
+# CODEOWNERS File Template
+#
+# This file specifies individuals or teams that are responsible for code in a repository.
+# When someone opens a pull request that modifies code owned by a CODEOWNERS entry,
+# the designated code owners are automatically requested for a review.
+#
+# Lines starting with '#' are comments.
+# Each line is a file pattern followed by one or more @username or @organization/team-name.
+#
+# For more information, see: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/about-codeowners
+
+# Default owners for all files. Optional, but good practice.
+# * @your-org/default-dev-team
+
+# Protect the /infra directory (e.g., Terraform, Kubernetes configs, CloudFormation)
+# requiring review from the infrastructure team.
+/infra/ @your-org/infra-team @your-username-infra
+
+# Protect the /auth directory (e.g., authentication services, identity management)
+# requiring review from the security or dedicated auth team.
+/auth/ @your-org/security-team @your-org/auth-team
+
+# Example for specific file types or subdirectories
+# /src/services/billing/ @your-org/billing-team
+# *.js @your-org/frontend-team
+# *.py @your-org/backend-team
+
+# Ensure that the root README.md is reviewed by a designated lead or documentation team.
+# /README.md @your-org/documentation-lead
