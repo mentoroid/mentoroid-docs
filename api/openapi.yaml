@@ -63,7 +63,9 @@ info:
     | Orchestrator | `/update_match` | 30 requests/minute |
     | Orchestrator | `/analyze` | 10 requests/minute |
     | Orchestrator | `/analyze-bulk` | 2 requests/minute |
+    | Orchestrator | `/rebuild_profile` | 2 requests/minute |
     | Orchestrator | `/status/*` | 60 requests/minute |
+    | Orchestrator | `/rebuild_profile/status/*` | 60 requests/minute |
 
   version: 1.0.0
   contact:
@@ -1314,6 +1316,288 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+
+  /rebuild_profile:
+    post:
+      tags:
+        - Analysis
+      summary: Rebuild player profile from archived data
+      description: |
+        Reprocesses all successful matches from archived data to regenerate `output_pga` files
+        with current `stats_extract` code logic.
+
+        **Use Cases:**
+        - After updating `stats_extract` logic to apply changes to existing matches
+        - To fix corrupted or missing `output_pga` files
+        - To regenerate player history/profile after data format changes
+
+        **Important:**
+        - No DEM file needed - uses permanently archived report data
+        - Processing time: ~5-10 minutes for 100 matches
+        - Request may timeout at gateway level, but rebuild continues in background
+        - Use `/rebuild_profile/status/{steam_id}` to check progress
+
+        **Rate Limit:** 2 requests/minute per user
+      operationId: rebuildProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - steam_id
+              properties:
+                steam_id:
+                  type: string
+                  description: Steam 64-bit ID
+                  pattern: '^[0-9]{17}$'
+                  example: "76561198944037188"
+      responses:
+        '200':
+          description: Rebuild started or completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  steam_id:
+                    type: string
+                  summary:
+                    type: object
+                    properties:
+                      total_matches:
+                        type: integer
+                        description: Total matches to rebuild
+                      processed:
+                        type: integer
+                        description: Successfully processed matches
+                      failed:
+                        type: integer
+                        description: Failed matches
+                      missing_archive:
+                        type: integer
+                        description: Matches without archived data
+                      manifest_updated:
+                        type: boolean
+                        description: Whether manifest was updated
+                      history_regenerated:
+                        type: boolean
+                        description: Whether history was regenerated
+                      profile_triggered:
+                        type: boolean
+                        description: Whether profile generation was triggered
+                      duration_seconds:
+                        type: number
+                        description: Total rebuild duration in seconds
+                      batch_mode:
+                        type: boolean
+                        description: Whether batch mode was used (>200 matches)
+              example:
+                success: true
+                steam_id: "76561198944037188"
+                summary:
+                  total_matches: 96
+                  processed: 96
+                  failed: 0
+                  missing_archive: 0
+                  manifest_updated: true
+                  history_regenerated: true
+                  profile_triggered: true
+                  duration_seconds: 562.2
+                  batch_mode: false
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                rebuild_in_progress:
+                  summary: Rebuild already running
+                  value:
+                    success: false
+                    error: "rebuild_in_progress"
+                    message: "A rebuild is already in progress for this user. Please try again later."
+                manifest_not_found:
+                  summary: User has no matches
+                  value:
+                    success: false
+                    error: "manifest_not_found"
+                    message: "User has no manifest (never played a match)"
+                no_successful_matches:
+                  summary: No matches to rebuild
+                  value:
+                    success: false
+                    error: "no_successful_matches"
+                    message: "No matches with status: success to rebuild"
+                invalid_steam_id_format:
+                  summary: Invalid Steam ID
+                  value:
+                    success: false
+                    error: "invalid_steam_id_format"
+                    message: "Steam ID must be 17-digit number"
+                rebuild_failed:
+                  summary: All matches failed
+                  value:
+                    success: false
+                    error: "rebuild_failed"
+                    message: "All matches failed to rebuild"
+                no_archives_found:
+                  summary: No archived data
+                  value:
+                    success: false
+                    error: "no_archives_found"
+                    message: "No archived full_reports found in GCS"
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnauthorizedError'
+        '504':
+          description: Gateway timeout (rebuild continues in background)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "upstream request timeout"
+                  note:
+                    type: string
+                    example: "Rebuild continues in background. Check status at /rebuild_profile/status/{steam_id}"
+
+  /rebuild_profile/status/{steam_id}:
+    get:
+      tags:
+        - Analysis
+      summary: Check profile rebuild status
+      description: |
+        Returns the current status of an ongoing or completed profile rebuild.
+
+        **Progress File Location:** `gs://mentoroid-pga-dev/system-data/rebuild-progress/{steam_id}.json`
+
+        **Polling Strategy:** Poll every 10-15 seconds while `status: "in_progress"`
+      operationId: getRebuildStatus
+      parameters:
+        - name: steam_id
+          in: path
+          required: true
+          description: Steam 64-bit ID
+          schema:
+            type: string
+            pattern: '^[0-9]{17}$'
+            example: "76561198944037188"
+      responses:
+        '200':
+          description: Rebuild status retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  steam_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [in_progress, completed, not_found]
+                    description: Current rebuild status
+                  request_id:
+                    type: string
+                    description: Unique rebuild request ID
+                  started_at:
+                    type: string
+                    format: date-time
+                    description: ISO 8601 timestamp when rebuild started
+                  total_matches:
+                    type: integer
+                    description: Total matches to process
+                  processed:
+                    type: integer
+                    description: Matches processed so far
+                  failed:
+                    type: integer
+                    description: Failed matches
+                  missing_archive:
+                    type: integer
+                    description: Matches without archived data
+                  current_match:
+                    type: string
+                    nullable: true
+                    description: Currently processing match ID (null if completed)
+                  last_updated:
+                    type: string
+                    format: date-time
+                    description: Last progress update timestamp
+                  completed_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Completion timestamp (only if completed)
+                  duration_seconds:
+                    type: number
+                    nullable: true
+                    description: Total duration in seconds (only if completed)
+                  manifest_updated:
+                    type: boolean
+                    nullable: true
+                    description: Whether manifest was updated (only if completed)
+                  history_regenerated:
+                    type: boolean
+                    nullable: true
+                    description: Whether history was regenerated (only if completed)
+                  profile_triggered:
+                    type: boolean
+                    nullable: true
+                    description: Whether profile generation was triggered (only if completed)
+              examples:
+                in_progress:
+                  summary: Rebuild in progress
+                  value:
+                    steam_id: "76561198944037188"
+                    status: "in_progress"
+                    request_id: "b4afded2-81db-4693-a074-d81726a50408"
+                    started_at: "2026-02-07T07:42:34.294977Z"
+                    total_matches: 96
+                    processed: 45
+                    failed: 0
+                    missing_archive: 0
+                    current_match: "8665462979"
+                    last_updated: "2026-02-07T07:48:00Z"
+                completed:
+                  summary: Rebuild completed
+                  value:
+                    steam_id: "76561198944037188"
+                    status: "completed"
+                    request_id: "b4afded2-81db-4693-a074-d81726a50408"
+                    started_at: "2026-02-07T07:42:34.294977Z"
+                    total_matches: 96
+                    processed: 96
+                    failed: 0
+                    missing_archive: 0
+                    current_match: null
+                    completed_at: "2026-02-07T07:51:36Z"
+                    duration_seconds: 562.2
+                    manifest_updated: true
+                    history_regenerated: true
+                    profile_triggered: true
+                    last_updated: "2026-02-07T07:51:36Z"
+                not_found:
+                  summary: No rebuild found
+                  value:
+                    steam_id: "76561198944037188"
+                    status: "not_found"
+                    message: "No rebuild progress found for this user"
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnauthorizedError'
 
   # ============================================================================
   # Public Check API Endpoint (Separate Cloud Function)
