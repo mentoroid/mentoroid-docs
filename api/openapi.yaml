@@ -66,6 +66,9 @@ info:
     | Orchestrator | `/rebuild_profile` | 2 requests/minute |
     | Orchestrator | `/status/*` | 60 requests/minute |
     | Orchestrator | `/rebuild_profile/status/*` | 60 requests/minute |
+    | Orchestrator | `/account/delete` | 3 requests/hour |
+    | Orchestrator | `/account/delete/cancel` | 5 requests/hour |
+    | Orchestrator | `/account/delete/status` | 10 requests/minute |
 
   version: 1.0.0
   contact:
@@ -116,6 +119,13 @@ tags:
   - name: Analysis
     description: |
       Match analysis workflow triggers.
+
+      **Base URL:** `https://dev.mentoroid.ai` (Orchestrator)
+  - name: Account Deletion
+    description: |
+      Account deletion with 30-day grace period. Users can request deletion, check status, or cancel within the grace period.
+
+      After requesting deletion, the API key is **immediately deactivated**. The only endpoints that accept deactivated keys are `/account/delete/cancel` and `/account/delete/status`.
 
       **Base URL:** `https://dev.mentoroid.ai` (Orchestrator)
   - name: Legacy
@@ -1598,6 +1608,266 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UnauthorizedError'
+
+  # ============================================================================
+  # Account Deletion Endpoints (Orchestrator)
+  # ============================================================================
+
+  /account/delete:
+    servers:
+      - url: https://dev.mentoroid.ai
+        description: Orchestrator (Dev)
+    post:
+      tags:
+        - Account Deletion
+      summary: Request account deletion
+      description: |
+        Request account deletion with a **30-day grace period**.
+
+        **What happens immediately:**
+        - API key is deactivated (all other endpoints will return 401)
+        - GCS marker file is created (stops all data pipelines from processing this user)
+        - Audit record is created with hashed IDs (no PII)
+
+        **After 30 days:**
+        - A scheduled cleanup worker hard-deletes all user data (GCS, Firestore, Firebase Auth)
+
+        **Cancellation:**
+        - Call `POST /account/delete/cancel` with the same (deactivated) API key
+        - Or re-log in via Steam — auto-cancels if within grace period
+
+        **Rate Limit:** 3 requests/hour
+      operationId: requestAccountDeletion
+      responses:
+        '200':
+          description: Deletion scheduled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [deletion_scheduled]
+                  deletion_request_id:
+                    type: string
+                    description: Unique request ID for tracking (format `del_` + 12 hex chars)
+                    example: "del_abc123def456"
+                  scheduled_for:
+                    type: string
+                    format: date-time
+                    description: When hard deletion will execute (30 days from now)
+                    example: "2026-03-20T10:30:00Z"
+                  message:
+                    type: string
+                    description: Human-readable confirmation message
+              example:
+                status: "deletion_scheduled"
+                deletion_request_id: "del_abc123def456"
+                scheduled_for: "2026-03-20T10:30:00Z"
+                message: "Your account is scheduled for deletion on 2026-03-20T10:30:00Z. You can cancel this within 30 days by logging in again or using the cancel endpoint."
+        '400':
+          description: No steam_id associated with API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "No steam_id associated with this API key"
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnauthorizedError'
+        '404':
+          description: User not found in Firestore
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "User not found"
+        '409':
+          description: Deletion already pending
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  scheduled_for:
+                    type: string
+                    format: date-time
+                    description: Existing scheduled deletion date
+                  deletion_request_id:
+                    type: string
+                    description: Existing request ID
+              example:
+                error: "Deletion already pending"
+                scheduled_for: "2026-03-20T10:30:00Z"
+                deletion_request_id: "del_abc123def456"
+
+  /account/delete/cancel:
+    servers:
+      - url: https://dev.mentoroid.ai
+        description: Orchestrator (Dev)
+    post:
+      tags:
+        - Account Deletion
+      summary: Cancel pending account deletion
+      description: |
+        Cancel a pending account deletion within the 30-day grace period.
+
+        **Authentication:** Uses `X-API-Key` header. Accepts API keys that were **deactivated** due to a deletion request (`deactivated_reason == "account_deletion_requested"`). All other deactivated keys are still rejected.
+
+        **What happens on cancel:**
+        1. GCS marker file is deleted (pipelines resume processing)
+        2. Firestore deletion fields are removed (using `DELETE_FIELD` sentinels)
+        3. API key is reactivated
+        4. Audit record is updated with cancellation timestamp
+
+        **Rate Limit:** 5 requests/hour
+      operationId: cancelAccountDeletion
+      responses:
+        '200':
+          description: Deletion cancelled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [deletion_cancelled]
+                  message:
+                    type: string
+              example:
+                status: "deletion_cancelled"
+                message: "Your account deletion has been cancelled. Your API key has been reactivated."
+        '400':
+          description: No steam_id associated with API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "No steam_id associated with this API key"
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnauthorizedError'
+        '404':
+          description: User not found or no pending deletion
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                user_not_found:
+                  summary: User not found
+                  value:
+                    error: "User not found"
+                no_pending:
+                  summary: No pending deletion
+                  value:
+                    error: "No pending deletion to cancel"
+        '410':
+          description: Grace period has expired — deletion cannot be cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Grace period has expired. Deletion cannot be cancelled."
+
+  /account/delete/status:
+    servers:
+      - url: https://dev.mentoroid.ai
+        description: Orchestrator (Dev)
+    get:
+      tags:
+        - Account Deletion
+      summary: Check account deletion status
+      description: |
+        Check the current status of an account deletion request.
+
+        **Authentication:** Uses `X-API-Key` header. Accepts API keys that were **deactivated** due to a deletion request (same as cancel endpoint).
+
+        Returns the deletion status if pending, or `null` if no active deletion request.
+
+        **Rate Limit:** 10 requests/minute
+      operationId: getAccountDeletionStatus
+      responses:
+        '200':
+          description: Deletion status returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deletion_status:
+                    type: string
+                    nullable: true
+                    description: |
+                      `"pending"` if deletion is active, `null` if no deletion request.
+                    enum: [pending, null]
+                  deletion_request_id:
+                    type: string
+                    nullable: true
+                    description: Request ID (only present when status is pending)
+                  requested_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: When deletion was requested (only present when status is pending)
+                  scheduled_for:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: When hard deletion is scheduled (only present when status is pending)
+                  message:
+                    type: string
+                    nullable: true
+                    description: Human-readable message (only present when no deletion)
+              examples:
+                pending:
+                  summary: Deletion is pending
+                  value:
+                    deletion_status: "pending"
+                    deletion_request_id: "del_abc123def456"
+                    requested_at: "2026-02-18T10:30:00Z"
+                    scheduled_for: "2026-03-20T10:30:00Z"
+                no_deletion:
+                  summary: No active deletion request
+                  value:
+                    deletion_status: null
+                    message: "No pending or recent deletion request."
+        '400':
+          description: No steam_id associated with API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "No steam_id associated with this API key"
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnauthorizedError'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "User not found"
 
   # ============================================================================
   # Public Check API Endpoint (Separate Cloud Function)

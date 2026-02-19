@@ -51,7 +51,10 @@
       "/bulk-status/{request_id}",
       "/status/{match_id}",
       "/health",
-      "/stats/steam"
+      "/stats/steam",
+      "/account/delete",
+      "/account/delete/cancel",
+      "/account/delete/status"
     ]
   },
   "_legacy": {
