@@ -196,6 +196,7 @@ paths:
                 player_name: "PlayerOne"
                 player_photo: "https://avatars.steamstatic.com/abc123.jpg"
                 rank_info: 65
+                rank_name: "divine"
                 overview_summary:
                   total_matches_analyzed: 47
                   total_wins: 28
@@ -206,14 +207,17 @@ paths:
                   last_match_date: 1702459800
                 mentoroid_metrics:
                   avg_mentoroid_score: 72.5
-                  last_mentoroid_score: 75
+                  avg_coached_score: null
+                  hidden: false
+                  mentoroid_improvement_percentage: null
                 ai_insights:
                   performance_summary: "Strong support player with excellent vision control."
-                  strengths:
-                    - "High kill participation in teamfights"
-                    - "Consistent ward placement"
-                  areas_to_improve:
-                    - "Early game deaths could be reduced"
+                  mid:
+                    strengths:
+                      - "High kill participation in teamfights"
+                      - "Consistent ward placement"
+                    areas_to_improve:
+                      - "Early game deaths could be reduced"
                 faction_winrates:
                   radiant:
                     games: 25
@@ -245,6 +249,7 @@ paths:
                 role_distribution:
                   "Soft Support":
                     games: 25
+                    wins: 16
                     percentage: 53.19
                     win_rate: 64.0
                     heroes:
@@ -263,11 +268,13 @@ paths:
                         avg_tower_damage: 850.0
                   "Hard Support":
                     games: 12
+                    wins: 7
                     percentage: 25.53
                     win_rate: 58.33
                     heroes: []
                   "Carry":
                     games: 10
+                    wins: 5
                     percentage: 21.28
                     win_rate: 50.0
                     heroes: []
@@ -275,10 +282,11 @@ paths:
                   - match_id: "8577546204"
                     hero_id: 14
                     mentoroid_score: 75
-                    result: "Win"
+                    result: "Won"
                     gpm: 312
                     xpm: 445
                     start_time: 1702459800
+                    coached: false
                 total_matches_available: 47
         '400':
           description: Invalid steam_id format
@@ -2149,9 +2157,9 @@ components:
         Complete player profile combining quantitative PGA stats and AI-generated insights.
       properties:
         player_steam_id:
-          type: integer
-          format: int64
-          description: Steam 64-bit ID as integer
+          type: string
+          pattern: '^[0-9]{17}$'
+          description: Steam 64-bit ID as string
         player_name:
           type: string
           description: Player's Steam display name
@@ -2173,6 +2181,10 @@ components:
             - 50-59: Ancient
             - 60-69: Divine
             - 70-80: Immortal
+        rank_name:
+          type: string
+          description: Human-readable rank name (e.g., "herald", "immortal")
+          example: "immortal"
         overview_summary:
           $ref: '#/components/schemas/OverviewSummary'
         mentoroid_metrics:
@@ -2240,28 +2252,46 @@ components:
           type: number
           format: float
           nullable: true
-          description: Average Mentoroid score across all analyzed matches (0-100). Null if no PGA data.
-        last_mentoroid_score:
+          description: Average Mentoroid score across all analyzed matches (0-10). Null if no PGA data.
+        avg_coached_score:
           type: number
           format: float
           nullable: true
-          description: Mentoroid score from most recent analyzed match. Null if no PGA data.
+          description: Average Mentoroid score for coached matches. Null if no coached matches.
+        hidden:
+          type: boolean
+          description: Whether the player's Mentoroid metrics are hidden from public view
+        mentoroid_improvement_percentage:
+          type: number
+          format: float
+          nullable: true
+          description: Percentage improvement in Mentoroid score over time. Null if insufficient data.
 
     AiInsights:
       type: object
-      description: AI-generated performance insights from LLM analysis
+      description: |
+        AI-generated performance insights from LLM analysis.
+        Contains a top-level performance_summary plus role-keyed objects
+        (e.g., "mid", "soft_support") each with strengths and areas_to_improve.
       properties:
         performance_summary:
           type: string
-          description: Brief narrative summary of player's performance
+          description: Brief narrative summary of player's overall performance
+      additionalProperties:
+        $ref: '#/components/schemas/RoleInsights'
+
+    RoleInsights:
+      type: object
+      description: AI-generated insights for a specific role
+      properties:
         strengths:
           type: array
-          description: List of identified player strengths
+          description: List of identified player strengths in this role
           items:
             type: string
         areas_to_improve:
           type: array
-          description: List of areas where player can improve
+          description: List of areas where player can improve in this role
           items:
             type: string
 
@@ -2369,13 +2399,6 @@ components:
           type: number
           format: float
           description: Average tower damage dealt
-        role_distribution:
-          type: object
-          description: |
-            Role distribution with win rates calculated at the backend.
-            Keys are role names (Carry, Mid, Offlane, Soft Support, Hard Support).
-          additionalProperties:
-            $ref: '#/components/schemas/RoleStats'
 
     MatchTrend:
       type: object
@@ -2405,6 +2428,9 @@ components:
         start_time:
           type: integer
           description: Unix timestamp of match start
+        coached:
+          type: boolean
+          description: Whether this match was a coached session
 
     RoleStats:
       type: object
@@ -2413,6 +2439,9 @@ components:
         games:
           type: integer
           description: Total games played in this role
+        wins:
+          type: integer
+          description: Total games won in this role
         percentage:
           type: number
           format: float
