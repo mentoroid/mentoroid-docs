@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Mentoroid In-Game Coaching API
-  version: 2.1.0
+  version: 2.2.0
   description: |
     ## Overview
     | Service | Port | Purpose |
@@ -10,11 +10,27 @@ info:
     | GSI Handler | 19151 | Dota 2 Game State Integration |
     | Match Events | 18100 | Flutter implements this server |
 
+    ## What's New in v2.2.0
+
+    ### TTS Toggle
+    New endpoints for enabling/disabling TTS globally:
+    - `POST /tts_toggle` - Enable or disable TTS (all speak() calls silently ignored when disabled)
+    - `GET /tts_status` - Get current TTS enabled/disabled state
+
+    ### Flutter Match End Payload Updated
+    The `/match_end` webhook session_data fields now match the binary's actual output:
+    - `result` ("Won"/"Lost") replaces `Win` ("Win"/"Lose")
+    - `duration_seconds` replaces `game_time`
+    - `net_worth` replaces `networth`
+    - `last_hits` replaces `lasthit`
+    - `kills`/`deaths`/`assists` replace `kill`/`death`/`assist`
+    - Added new fields: `steam_id`, `is_radiant`, `start_time`, `gold`, `gpm`
+
     ## What's New in v2.1.0
 
     ### Voice Pack System
     New voice control endpoints for selecting and previewing TTS voice packs:
-    - `POST /voice_set` - Set voice pack (fin = male, lily = female)
+    - `POST /voice_set` - Set voice pack (bella = female, michael = male)
     - `GET /voice_get` - Get current voice and available options
     - `GET /voice_list` - List all voice packs with metadata
     - `POST /voice_sample` - Preview voice without changing setting
@@ -109,6 +125,8 @@ tags:
     description: Health check and status monitoring endpoints
   - name: Pipeline Control
     description: Manual pipeline control (optional - auto-detection handles this)
+  - name: TTS Control
+    description: TTS enable/disable and volume control
   - name: Voice Control
     description: TTS voice pack selection and preview
   - name: Match Events (Flutter Server)
@@ -300,7 +318,7 @@ paths:
 
   /volume_set:
     post:
-      tags: [Pipeline Control]
+      tags: [TTS Control]
       summary: Set TTS volume
       description: |
         Set the text-to-speech volume for coaching audio feedback.
@@ -326,7 +344,7 @@ paths:
 
   /volume_get:
     get:
-      tags: [Pipeline Control]
+      tags: [TTS Control]
       summary: Get TTS volume
       description: |
         Get the current text-to-speech volume setting.
@@ -341,6 +359,76 @@ paths:
                 status: success
                 volume: 75
 
+  /tts_toggle:
+    post:
+      tags: [TTS Control]
+      summary: Enable or disable TTS
+      description: |
+        Enable or disable text-to-speech globally. When disabled, all `speak()` calls
+        are silently ignored - no audio is generated or played.
+
+        Useful for muting coaching audio without changing volume.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TTSToggleRequest'
+            examples:
+              disable:
+                summary: Disable TTS
+                value:
+                  enabled: false
+              enable:
+                summary: Enable TTS
+                value:
+                  enabled: true
+      responses:
+        "200":
+          description: TTS state updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TTSToggleResponse'
+              examples:
+                disabled:
+                  summary: TTS disabled
+                  value:
+                    status: success
+                    enabled: false
+                    message: "TTS disabled"
+                enabled:
+                  summary: TTS enabled
+                  value:
+                    status: success
+                    enabled: true
+                    message: "TTS enabled"
+
+  /tts_status:
+    get:
+      tags: [TTS Control]
+      summary: Get TTS enabled state
+      description: |
+        Check whether TTS is currently enabled or disabled.
+      responses:
+        "200":
+          description: Current TTS state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TTSStatusResponse'
+              examples:
+                enabled:
+                  summary: TTS is enabled
+                  value:
+                    status: success
+                    enabled: true
+                disabled:
+                  summary: TTS is disabled
+                  value:
+                    status: success
+                    enabled: false
+
   /voice_set:
     post:
       tags: [Voice Control]
@@ -349,8 +437,8 @@ paths:
         Set the text-to-speech voice pack. Changes take effect on next audio playback.
 
         **Available voices:**
-        - `fin` - Male voice
-        - `lily` - Female voice
+        - `bella` - Female voice
+        - `michael` - Male voice
       requestBody:
         required: true
         content:
@@ -358,14 +446,14 @@ paths:
             schema:
               $ref: '#/components/schemas/VoiceSetRequest'
             examples:
-              set_fin:
-                summary: Set male voice (Fin)
+              set_bella:
+                summary: Set female voice (Bella)
                 value:
-                  voice: "fin"
-              set_lily:
-                summary: Set female voice (Lily)
+                  voice: "bella"
+              set_michael:
+                summary: Set male voice (Michael)
                 value:
-                  voice: "lily"
+                  voice: "michael"
       responses:
         "200":
           description: Voice set successfully
@@ -374,25 +462,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/VoiceSetResponse'
               examples:
-                fin_response:
-                  summary: Fin voice set
+                bella_response:
+                  summary: Bella voice set
                   value:
                     status: success
-                    voice: "fin"
-                    message: "Voice set to 'fin'"
-                lily_response:
-                  summary: Lily voice set
+                    voice: "bella"
+                    message: "Voice set to 'bella'"
+                michael_response:
+                  summary: Michael voice set
                   value:
                     status: success
-                    voice: "lily"
-                    message: "Voice set to 'lily'"
+                    voice: "michael"
+                    message: "Voice set to 'michael'"
         "400":
           description: Invalid voice pack
           content:
             application/json:
               example:
                 status: error
-                message: "Invalid voice 'invalid'. Available: ['fin', 'lily']"
+                message: "Invalid voice 'invalid'. Available: ['bella', 'michael']"
 
   /voice_get:
     get:
@@ -408,18 +496,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/VoiceGetResponse'
               examples:
-                fin_selected:
-                  summary: Fin voice selected
+                bella_selected:
+                  summary: Bella voice selected
                   value:
                     status: success
-                    voice: "fin"
-                    available_voices: ["fin", "lily"]
-                lily_selected:
-                  summary: Lily voice selected
+                    voice: "bella"
+                    available_voices: ["bella", "michael"]
+                michael_selected:
+                  summary: Michael voice selected
                   value:
                     status: success
-                    voice: "lily"
-                    available_voices: ["fin", "lily"]
+                    voice: "michael"
+                    available_voices: ["bella", "michael"]
 
   /voice_list:
     get:
@@ -437,12 +525,12 @@ paths:
               example:
                 status: success
                 voices:
-                  - id: "fin"
-                    name: "Fin"
-                    description: "Male voice"
-                  - id: "lily"
-                    name: "Lily"
+                  - id: "bella"
+                    name: "Bella"
                     description: "Female voice"
+                  - id: "michael"
+                    name: "Michael"
+                    description: "Male voice"
                 total: 2
 
   /voice_sample:
@@ -451,7 +539,7 @@ paths:
       summary: Preview voice pack
       description: |
         Play a sample audio for the specified voice pack without changing the current setting.
-        Plays 'welcome_to_mentoroid.mp3' from the voice pack folder.
+        Uses Kokoro TTS to generate and play "welcome to mentoroid" in the specified voice.
 
         If no voice is specified, plays sample using the current voice.
 
@@ -463,14 +551,14 @@ paths:
             schema:
               $ref: '#/components/schemas/VoiceSetRequest'
             examples:
-              preview_fin:
-                summary: Preview Fin voice (male)
+              preview_bella:
+                summary: Preview Bella voice (female)
                 value:
-                  voice: "fin"
-              preview_lily:
-                summary: Preview Lily voice (female)
+                  voice: "bella"
+              preview_michael:
+                summary: Preview Michael voice (male)
                 value:
-                  voice: "lily"
+                  voice: "michael"
       responses:
         "200":
           description: Sample playing
@@ -479,25 +567,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/VoiceSampleResponse'
               examples:
-                fin_sample:
-                  summary: Fin voice sample
+                bella_sample:
+                  summary: Bella voice sample
                   value:
                     status: success
-                    voice: "fin"
-                    message: "Playing sample for 'fin' voice"
-                lily_sample:
-                  summary: Lily voice sample
+                    voice: "bella"
+                    message: "Playing sample for 'bella' voice"
+                michael_sample:
+                  summary: Michael voice sample
                   value:
                     status: success
-                    voice: "lily"
-                    message: "Playing sample for 'lily' voice"
+                    voice: "michael"
+                    message: "Playing sample for 'michael' voice"
         "400":
           description: Invalid voice pack
           content:
             application/json:
               example:
                 status: error
-                message: "Invalid voice 'invalid'. Available: ['fin', 'lily']"
+                message: "Invalid voice 'invalid'. Available: ['bella', 'michael']"
 
   /match_started:
     post:
@@ -542,47 +630,57 @@ paths:
               win_example:
                 summary: Match won
                 value:
-                  match_id: "8648059066"
+                  match_id: "8696654341"
                   session_data:
+                    steam_id: 76561198377048915
                     hero_id: 35
+                    is_radiant: true
                     hero_facet: 1
                     Facet_Selected: "Ghillie Suit"
-                    Win: "Win"
-                    role: "Support"
-                    game_time: 2145.0
-                    date: "2026-01-14 00:09:44"
-                    networth: 20491
-                    xpm: 935.0
-                    lasthit: 61
-                    denies: 5
-                    kill: 8
-                    death: 3
-                    assist: 22
-                    kill_participant: 0.72
-                    death_participant: 0.15
-                    observer_ward: 12
-                    sentry_ward: 8
+                    result: "Won"
+                    role: "Hard Support"
+                    duration_seconds: 937.0
+                    start_time: 1771455092
+                    date: "2026-02-19 04:40:06"
+                    net_worth: 11933
+                    gold: 1233
+                    gpm: 493
+                    xpm: 442.0
+                    last_hits: 92
+                    denies: 0
+                    kill_participant: 7.69
+                    death_participant: 0.0
+                    kills: 1
+                    deaths: 0
+                    assists: 0
+                    observer_ward: 0
+                    sentry_ward: 0
               lose_example:
                 summary: Match lost
                 value:
                   match_id: "8648059067"
                   session_data:
+                    steam_id: 76561198377048915
                     hero_id: 74
+                    is_radiant: false
                     hero_facet: 2
                     Facet_Selected: "Reflective Counter"
-                    Win: "Lose"
+                    result: "Lost"
                     role: "Carry"
-                    game_time: 1823.0
+                    duration_seconds: 1823.0
+                    start_time: 1736150521
                     date: "2026-01-14 01:15:32"
-                    networth: 15230
+                    net_worth: 15230
+                    gold: 2150
+                    gpm: 501
                     xpm: 612.0
-                    lasthit: 185
+                    last_hits: 185
                     denies: 12
-                    kill: 5
-                    death: 9
-                    assist: 7
-                    kill_participant: 0.45
-                    death_participant: 0.38
+                    kill_participant: 45.0
+                    death_participant: 38.0
+                    kills: 5
+                    deaths: 9
+                    assists: 7
                     observer_ward: 0
                     sentry_ward: 0
       responses:
@@ -599,7 +697,11 @@ paths:
       summary: Session ended webhook
       description: |
         **Flutter must implement this endpoint.**
-        Called by the coaching backend when Dota 2 is closed (session ended).
+        Called by the coaching backend when the Dota 2 session ends. This is triggered in two scenarios:
+        1. **Dota 2 closes** - The auto-detection watcher detects `dota2.exe` is no longer running
+        2. **Manual `/stop` call** - Pipeline is manually stopped via the API
+
+        This is sent **after** any `/match_end` webhook (if a match was in progress).
         Use this to update UI state, show session summary, or cleanup resources.
       requestBody:
         required: true
@@ -858,9 +960,9 @@ components:
       properties:
         voice:
           type: string
-          enum: ["fin", "lily"]
+          enum: ["bella", "michael"]
           description: Voice pack ID
-          example: "fin"
+          example: "bella"
 
     VoiceSetResponse:
       type: object
@@ -871,11 +973,11 @@ components:
         voice:
           type: string
           description: Selected voice pack ID
-          example: "fin"
+          example: "bella"
         message:
           type: string
           description: Confirmation message
-          example: "Voice set to 'fin'"
+          example: "Voice set to 'bella'"
 
     VoiceGetResponse:
       type: object
@@ -886,13 +988,13 @@ components:
         voice:
           type: string
           description: Currently selected voice pack ID
-          example: "fin"
+          example: "bella"
         available_voices:
           type: array
           items:
             type: string
           description: List of available voice pack IDs
-          example: ["fin", "lily"]
+          example: ["bella", "michael"]
 
     VoiceListResponse:
       type: object
@@ -916,15 +1018,15 @@ components:
         id:
           type: string
           description: Voice pack ID
-          example: "fin"
+          example: "bella"
         name:
           type: string
           description: Display name
-          example: "Fin"
+          example: "Bella"
         description:
           type: string
           description: Voice description
-          example: "Male voice"
+          example: "Female voice"
 
     VoiceSampleResponse:
       type: object
@@ -935,11 +1037,47 @@ components:
         voice:
           type: string
           description: Voice pack being previewed
-          example: "lily"
+          example: "bella"
         message:
           type: string
           description: Confirmation message
-          example: "Playing sample for 'lily' voice"
+          example: "Playing sample for 'bella' voice"
+
+    TTSToggleRequest:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+          description: Set to true to enable TTS, false to disable
+          example: false
+
+    TTSToggleResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        enabled:
+          type: boolean
+          description: Current TTS enabled state after toggle
+          example: false
+        message:
+          type: string
+          description: Confirmation message
+          example: "TTS disabled"
+
+    TTSStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        enabled:
+          type: boolean
+          description: Whether TTS is currently enabled
+          example: true
 
     MatchStartedRequest:
       type: object
@@ -1065,10 +1203,18 @@ components:
       type: object
       description: Complete match session statistics
       properties:
+        steam_id:
+          type: integer
+          description: Player's Steam 64-bit ID
+          example: 76561198377048915
         hero_id:
           type: integer
           description: Dota 2 hero ID
           example: 35
+        is_radiant:
+          type: boolean
+          description: True if player on Radiant, false if Dire
+          example: true
         hero_facet:
           type: integer
           description: Selected hero facet number (1-based)
@@ -1077,64 +1223,76 @@ components:
           type: string
           description: Name of the selected facet
           example: "Ghillie Suit"
-        Win:
+        result:
           type: string
-          enum: ["Win", "Lose"]
+          enum: ["Won", "Lost"]
           description: Match outcome
-          example: "Win"
+          example: "Won"
         role:
           type: string
-          enum: ["Carry", "Mid", "Offlane", "Support", "Hard Support"]
+          enum: ["Carry", "Mid", "Offlane", "Soft Support", "Hard Support"]
           description: Player's role in the match
-          example: "Support"
-        game_time:
+          example: "Hard Support"
+        duration_seconds:
           type: number
           format: float
           description: Match duration in seconds
-          example: 553.0
+          example: 937.0
+        start_time:
+          type: integer
+          description: Unix timestamp when match started
+          example: 1771455092
         date:
           type: string
           description: Match end timestamp (YYYY-MM-DD HH:MM:SS)
-          example: "2026-01-14 00:09:44"
-        networth:
+          example: "2026-02-19 04:40:06"
+        net_worth:
           type: integer
           description: Final networth at match end
-          example: 20491
+          example: 11933
+        gold:
+          type: integer
+          description: Current gold at match end
+          example: 1233
+        gpm:
+          type: integer
+          description: Gold per minute
+          example: 493
         xpm:
           type: number
           format: float
           description: Experience per minute
-          example: 935.0
-        lasthit:
+          example: 442.0
+        last_hits:
           type: integer
           description: Total last hits
-          example: 61
+          example: 92
         denies:
           type: integer
           description: Total denies
           example: 0
-        kill:
-          type: integer
-          description: Total kills
-          example: 0
-        death:
-          type: integer
-          description: Total deaths
-          example: 0
-        assist:
-          type: integer
-          description: Total assists
-          example: 0
         kill_participant:
           type: number
           format: float
-          description: Kill participation percentage (0.0 - 1.0)
-          example: 0.0
+          description: Kill participation percentage (0.0 - 100.0)
+          example: 7.69
         death_participant:
           type: number
           format: float
-          description: Death participation percentage (0.0 - 1.0)
+          description: Death participation percentage (0.0 - 100.0)
           example: 0.0
+        kills:
+          type: integer
+          description: Total kills
+          example: 1
+        deaths:
+          type: integer
+          description: Total deaths
+          example: 0
+        assists:
+          type: integer
+          description: Total assists
+          example: 0
         observer_ward:
           type: integer
           description: Observer wards placed
