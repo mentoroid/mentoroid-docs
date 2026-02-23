@@ -1,0 +1,832 @@
+openapi: 3.0.3
+info:
+  title: Mentoroid Session Summary API
+  description: |
+    Post-session LLM-powered analysis for Dota 2 players.
+
+    ## Overview
+
+    After a playing session ends, Flutter sends match stats to this service and receives an
+    AI-generated coaching summary covering performance trends, strengths, weaknesses, and
+    improvement suggestions across the session.
+
+    The service uses an **async task pattern**: submit once, poll for the result.
+
+    ## Architecture
+
+    | Component | Detail |
+    |-----------|--------|
+    | **Type** | Cloud Run (single instance, in-memory task store) |
+    | **LLM** | Claude (Anthropic) via `llm_framework` |
+    | **Auth** | `X-API-Key` header (Firestore-backed) |
+    | **Concurrency** | 2 background workers, 4 gunicorn threads |
+
+    ## Request Flow
+
+    ```
+    ┌──────────────┐     ┌──────────────────┐     ┌───────────┐
+    │ Flutter App   │     │ Session Summary  │     │  Claude   │
+    │              │     │  (Cloud Run)      │     │  (LLM)    │
+    └──────┬───────┘     └────────┬─────────┘     └─────┬─────┘
+           │                      │                     │
+           │ 1. POST /session-summary                   │
+           │   [matches + benchmarks]                   │
+           │ ────────────────────>│                     │
+           │                      │                     │
+           │ 2. 202 Accepted      │                     │
+           │   {task_id, status}  │                     │
+           │ <────────────────────│                     │
+           │                      │                     │
+           │                      │ 3. Background       │
+           │                      │    analysis          │
+           │                      │ ───────────────────>│
+           │                      │                     │
+           │                      │ 4. LLM summary      │
+           │                      │ <───────────────────│
+           │                      │                     │
+           │ 5. GET /session-summary/{task_id}          │
+           │ ────────────────────>│                     │
+           │                      │                     │
+           │ 6. 200 OK            │                     │
+           │   {status, result}   │                     │
+           │ <────────────────────│                     │
+    ```
+
+    ## Important Notes
+
+    - **Result is consumed on read.** Once you GET a `complete` or `error` result, it is deleted
+      from the server. Cache the result client-side.
+    - **Task TTL is 10 minutes.** Poll within 10 minutes of submitting or the task expires (410 Gone).
+    - **Single instance.** The service runs with `min=1, max=1` instances. The in-memory task store
+      is safe because POST and GET always hit the same process.
+
+    ## Base URLs
+
+    | Environment | Base URL |
+    |-------------|----------|
+    | Dev | `https://session-summary-<hash>-uc.a.run.app` |
+    | Prod | `https://session-summary-<hash>-uc.a.run.app` |
+
+    > Run `gcloud run services describe session-summary --region=us-central1 --format='value(status.url)'`
+    > to get the actual URL for your environment.
+
+    ## Authentication
+
+    All endpoints (except `/health`) require an API key via the `X-API-Key` header.
+
+    API keys are generated during Steam authentication. See the [Steam Authentication API](../auth/).
+
+    **Header:** `X-API-Key: <your_api_key>`
+
+    Key formats: `mk_<32hex>` (Steam auth) or `key-<32hex>` (legacy admin).
+
+    ## Rate Limits
+
+    | Endpoint | Limit |
+    |----------|-------|
+    | `POST /session-summary` | 10 requests/minute per API key |
+
+  version: 1.0.0
+  contact:
+    name: Mentoroid Team
+    email: dev@mentoroid.ai
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://session-summary-dev.mentoroid.ai
+    description: Session Summary (Dev)
+  - url: https://session-summary.mentoroid.ai
+    description: Session Summary (Prod)
+
+tags:
+  - name: Session Summary
+    description: |
+      Submit session data and poll for LLM-generated analysis.
+
+      **Type:** Cloud Run service (async task pattern)
+  - name: Health
+    description: Service health check
+
+paths:
+  /session-summary:
+    post:
+      tags:
+        - Session Summary
+      summary: Submit session for analysis
+      description: |
+        Submit match data from a playing session for LLM-powered analysis.
+
+        ## Flow
+        1. Flutter sends an array of match objects with stats and benchmarks
+        2. Server validates input, maps fields, and submits a background analysis task
+        3. Returns `202 Accepted` with a `task_id` for polling
+
+        ## Input Format
+        The request body is a **JSON array** of match objects. Each match contains:
+        - `match_id` — Unique match identifier (string or number)
+        - `session_data` — Match statistics from the game
+        - `benchmarks` — Hero/role benchmark data for comparison
+
+        ## Field Mapping
+        Flutter field names are mapped internally:
+        - `kill_participant` → `kill_participation`
+        - `death_participant` → `death_participation`
+        - `duration_seconds` → converted to minutes
+        - `hero_id` → resolved to hero name via hero map
+        - `role` → normalized (`"Support"` → `"Hard Support"`, `"Carry"` stays `"Carry"`, etc.)
+        - `result` → normalized (`"Won"` → `"win"`, `"Lost"` → `"loss"`)
+
+        ## Validation
+        - Minimum **1** match required
+        - Maximum **20** matches per request
+        - Each match must have `match_id`, `session_data`, and a non-zero `hero_id`
+
+        ## Rate Limits
+        - 10 requests per minute per API key
+      operationId: submitSessionSummary
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              minItems: 1
+              maxItems: 20
+              items:
+                $ref: '#/components/schemas/MatchInput'
+            example:
+              - match_id: "8617881215"
+                session_data:
+                  hero_id: 74
+                  hero_name: "Invoker"
+                  result: "loss"
+                  duration_seconds: 2550
+                  role: "Support"
+                  xpm: 380
+                  net_worth: 8500
+                  last_hits: 45
+                  denies: 3
+                  kills: 2
+                  deaths: 6
+                  assists: 18
+                  kda: 3.33
+                  kill_participant: 45.5
+                  death_participant: 25.0
+                session_benchmarks:
+                  xpm: 350
+                  net_worth: 7800
+                  last_hits: 35
+                  denies: 2
+                  kills: 3
+                  deaths: 5
+                  assists: 16
+                  kill_participation: 50.0
+                  death_participation: 28.0
+              - match_id: "8617881216"
+                session_data:
+                  hero_id: 74
+                  hero_name: "Invoker"
+                  result: "win"
+                  duration_seconds: 2100
+                  role: "Carry"
+                  xpm: 550
+                  net_worth: 18000
+                  last_hits: 200
+                  denies: 8
+                  kills: 12
+                  deaths: 3
+                  assists: 8
+                  kda: 6.67
+                  kill_participant: 65.0
+                  death_participant: 15.0
+                session_benchmarks:
+                  xpm: 500
+                  net_worth: 14000
+                  last_hits: 150
+                  denies: 8
+                  kills: 10
+                  deaths: 4
+                  assists: 8
+                  kill_participation: 55.0
+                  death_participation: 22.0
+      responses:
+        '202':
+          description: Analysis task submitted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSubmitted'
+              example:
+                task_id: "1246875b-7064-4bc7-8aed-7eb53c11046b"
+                status: "pending"
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                not_array:
+                  summary: Body is not a JSON array
+                  value:
+                    error: "Request body must be a JSON array of matches"
+                    success: false
+                too_many:
+                  summary: Too many matches
+                  value:
+                    error: "Maximum 20 matches per session"
+                    success: false
+                missing_match_id:
+                  summary: Missing match_id
+                  value:
+                    error: "Match 0: missing 'match_id'"
+                    success: false
+                missing_hero_id:
+                  summary: Missing hero_id
+                  value:
+                    error: "Match 0: missing or invalid 'hero_id' in session_data"
+                    success: false
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Unauthorized. Valid X-API-Key header required."
+                success: false
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Rate limit exceeded. Maximum 10 requests per minute."
+                success: false
+        '503':
+          description: Service shutting down
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Service shutting down, please retry."
+                success: false
+
+  /session-summary/{task_id}:
+    get:
+      tags:
+        - Session Summary
+      summary: Poll for analysis result
+      description: |
+        Poll for the result of a previously submitted session analysis task.
+
+        ## Polling Strategy
+        - Recommended poll interval: **2-3 seconds**
+        - LLM analysis typically takes **3-8 seconds**
+        - Maximum wait: **10 minutes** (task TTL)
+
+        ## Status Values
+        | Status | Meaning | Action |
+        |--------|---------|--------|
+        | `pending` | Still processing | Poll again in 2-3s |
+        | `complete` | Analysis done | Read `result` field |
+        | `error` | Analysis failed | Read `error` field |
+
+        ## Important: Result Consumption
+        **The result is consumed on read.** When you receive a `complete` or `error` response,
+        the task is deleted from the server. Subsequent polls for the same `task_id` will
+        return `410 Gone`.
+
+        Cache the result client-side after receiving it.
+      operationId: pollSessionSummary
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          description: |
+            The task ID returned by `POST /session-summary`.
+
+            Format: UUID v4 (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
+          schema:
+            type: string
+            format: uuid
+            pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            example: "1246875b-7064-4bc7-8aed-7eb53c11046b"
+      responses:
+        '200':
+          description: Task status with optional result
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/TaskPending'
+                  - $ref: '#/components/schemas/TaskComplete'
+                  - $ref: '#/components/schemas/TaskError'
+              examples:
+                pending:
+                  summary: Still processing
+                  value:
+                    task_id: "1246875b-7064-4bc7-8aed-7eb53c11046b"
+                    status: "pending"
+                complete:
+                  summary: Analysis complete
+                  value:
+                    task_id: "1246875b-7064-4bc7-8aed-7eb53c11046b"
+                    status: "complete"
+                    result:
+                      session_id: "session_20260223_122324"
+                      steam_id: null
+                      analysis_timestamp: "2026-02-23T12:23:24.300962Z"
+                      session_overview:
+                        total_games: 3
+                        wins: 1
+                        losses: 2
+                        win_rate: 0.333
+                        total_duration_minutes: 122.5
+                        roles_played:
+                          Hard Support: 2
+                          Carry: 1
+                        heroes_played:
+                          Invoker: 3
+                        primary_role: "Hard Support"
+                      session_averages:
+                        xpm: 386.7
+                        net_worth: 9833.0
+                        last_hits: 72.0
+                        denies: 4.0
+                        kills: 4.3
+                        deaths: 5.0
+                        assists: 16.7
+                        kda: 4.28
+                        kill_participation: 53.5
+                        death_participation: 22.3
+                      benchmark_comparisons:
+                        - metric: "xpm"
+                          user_avg: 386.7
+                          benchmark: 350
+                          percentage: 110.5
+                          status: "average"
+                        - metric: "deaths"
+                          user_avg: 5.0
+                          benchmark: 5
+                          percentage: 100.0
+                          status: "average"
+                      game_analysis:
+                        - match_id: "8617881215"
+                          hero: "Invoker"
+                          role: "Hard Support"
+                          result: "loss"
+                          stats:
+                            xpm: 380.0
+                            net_worth: 8500
+                            last_hits: 45
+                            denies: 3
+                            kills: 2
+                            deaths: 6
+                            assists: 18
+                            kda: 3.33
+                            kill_participation: 45.5
+                            death_participation: 25.0
+                      hero_utilization:
+                        Invoker:
+                          games_played: 3
+                          wins: 1
+                          win_rate: 0.333
+                          avg_performance:
+                            xpm: 386.7
+                            net_worth: 9833
+                            last_hits: 72
+                            denies: 4.0
+                            kills: 4.3
+                            deaths: 5.0
+                            assists: 16.7
+                            kda: 4.28
+                            kill_participation: 53.5
+                            death_participation: 22.3
+                      llm_summary: "The player's session shows a mixed performance with a 33.3% win rate across 3 games as Invoker. While their KDA of 4.28 and kill participation of 53.5% indicate solid teamfight contribution, the high death count suggests positioning improvements are needed. Focus on reducing deaths in the support role while maintaining your strong assist numbers."
+                error:
+                  summary: Analysis failed
+                  value:
+                    task_id: "1246875b-7064-4bc7-8aed-7eb53c11046b"
+                    status: "error"
+                    error: "Analysis failed. Please try again."
+        '400':
+          description: Invalid task_id format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Invalid task_id format"
+                success: false
+        '410':
+          description: Task expired or already consumed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Task not found. It may have expired or the service restarted — please resubmit."
+                success: false
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: |
+        Returns service health status. No authentication required.
+
+        Used by Cloud Run health checks and monitoring.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "healthy"
+                service: "session-summary"
+                timestamp: "2026-02-23T12:19:29.058196Z"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key from Steam authentication.
+
+        Formats: `mk_<32hex>` (Steam auth) or `key-<32hex>` (legacy admin).
+
+  schemas:
+    MatchInput:
+      type: object
+      required:
+        - match_id
+        - session_data
+      properties:
+        match_id:
+          type: string
+          description: Unique match identifier
+          example: "8617881215"
+        session_data:
+          type: object
+          required:
+            - hero_id
+          description: Match statistics from the game
+          properties:
+            hero_id:
+              type: integer
+              description: Dota 2 hero ID (must be non-zero)
+              example: 74
+            hero_name:
+              type: string
+              description: Hero name (optional, resolved from hero_id if omitted)
+              example: "Invoker"
+            result:
+              type: string
+              description: Match result. Accepts `Won`, `Lost`, `win`, `loss`.
+              enum: ["Won", "Lost", "win", "loss"]
+              example: "loss"
+            duration_seconds:
+              type: integer
+              description: Match duration in seconds (converted to minutes internally)
+              example: 2550
+            role:
+              type: string
+              description: |
+                Player role. Normalized internally:
+                - `Support` → `Hard Support`
+                - `Carry` → `Carry`
+                - `Mid` → `Mid`
+                - `Offlane` → `Offlane`
+                - `Soft Support` → `Soft Support`
+              example: "Support"
+            xpm:
+              type: number
+              description: Experience per minute
+              example: 380
+            net_worth:
+              type: integer
+              description: Final net worth
+              example: 8500
+            last_hits:
+              type: integer
+              description: Last hits count
+              example: 45
+            denies:
+              type: integer
+              description: Denies count
+              example: 3
+            kills:
+              type: integer
+              description: Kill count
+              example: 2
+            deaths:
+              type: integer
+              description: Death count
+              example: 6
+            assists:
+              type: integer
+              description: Assist count
+              example: 18
+            kda:
+              type: number
+              description: KDA ratio
+              example: 3.33
+            gpm:
+              type: number
+              description: Gold per minute
+              example: 420
+            kill_participant:
+              type: number
+              description: Kill participation percentage (mapped to `kill_participation`)
+              example: 45.5
+            death_participant:
+              type: number
+              description: Death participation percentage (mapped to `death_participation`)
+              example: 25.0
+            date:
+              type: string
+              description: Match timestamp (optional)
+              example: "2026-02-23T10:30:00Z"
+        benchmarks:
+          type: object
+          description: |
+            Hero/role benchmark data for comparison. Keyed by hero name, then by role.
+
+            Example: `{"Invoker": {"Hard Support": {xpm: 350, ...}}}`
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: object
+              properties:
+                xpm:
+                  type: number
+                net_worth:
+                  type: integer
+                last_hits:
+                  type: integer
+                denies:
+                  type: integer
+                kills:
+                  type: integer
+                deaths:
+                  type: integer
+                assists:
+                  type: integer
+                kill_participation:
+                  type: number
+                death_participation:
+                  type: number
+
+    TaskSubmitted:
+      type: object
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          description: Unique task identifier for polling
+          example: "1246875b-7064-4bc7-8aed-7eb53c11046b"
+        status:
+          type: string
+          enum: ["pending"]
+          example: "pending"
+
+    TaskPending:
+      type: object
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: ["pending"]
+
+    TaskComplete:
+      type: object
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: ["complete"]
+        result:
+          $ref: '#/components/schemas/SessionSummaryResult'
+
+    TaskError:
+      type: object
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: ["error"]
+        error:
+          type: string
+          description: Human-readable error message
+
+    SessionSummaryResult:
+      type: object
+      description: Complete session analysis result
+      properties:
+        session_id:
+          type: string
+          description: Auto-generated session identifier
+          example: "session_20260223_122324"
+        steam_id:
+          type: string
+          nullable: true
+          description: Player's Steam ID (null if not provided)
+        analysis_timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of analysis completion
+          example: "2026-02-23T12:23:24.300962Z"
+        session_overview:
+          $ref: '#/components/schemas/SessionOverview'
+        session_averages:
+          $ref: '#/components/schemas/SessionAverages'
+        benchmark_comparisons:
+          type: array
+          items:
+            $ref: '#/components/schemas/BenchmarkComparison'
+        game_analysis:
+          type: array
+          items:
+            $ref: '#/components/schemas/GameAnalysis'
+        hero_utilization:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/HeroUtilization'
+        llm_summary:
+          type: string
+          nullable: true
+          description: |
+            AI-generated coaching summary covering performance trends,
+            strengths, weaknesses, and improvement suggestions.
+
+    SessionOverview:
+      type: object
+      properties:
+        total_games:
+          type: integer
+          example: 3
+        wins:
+          type: integer
+          example: 1
+        losses:
+          type: integer
+          example: 2
+        win_rate:
+          type: number
+          format: float
+          example: 0.333
+        total_duration_minutes:
+          type: number
+          example: 122.5
+        roles_played:
+          type: object
+          additionalProperties:
+            type: integer
+          example:
+            Hard Support: 2
+            Carry: 1
+        heroes_played:
+          type: object
+          additionalProperties:
+            type: integer
+          example:
+            Invoker: 3
+        primary_role:
+          type: string
+          example: "Hard Support"
+
+    SessionAverages:
+      type: object
+      description: Average stats across all games in the session
+      properties:
+        xpm:
+          type: number
+          example: 386.7
+        net_worth:
+          type: number
+          example: 9833.0
+        last_hits:
+          type: number
+          example: 72.0
+        denies:
+          type: number
+          example: 4.0
+        kills:
+          type: number
+          example: 4.3
+        deaths:
+          type: number
+          example: 5.0
+        assists:
+          type: number
+          example: 16.7
+        kda:
+          type: number
+          example: 4.28
+        kill_participation:
+          type: number
+          example: 53.5
+        death_participation:
+          type: number
+          example: 22.3
+
+    BenchmarkComparison:
+      type: object
+      properties:
+        metric:
+          type: string
+          description: Stat being compared
+          example: "xpm"
+        user_avg:
+          type: number
+          description: Player's session average
+          example: 386.7
+        benchmark:
+          type: number
+          description: Benchmark value for comparison
+          example: 350
+        percentage:
+          type: number
+          description: Player's performance as percentage of benchmark
+          example: 110.5
+        status:
+          type: string
+          description: Performance category
+          enum: ["high", "average", "low"]
+          example: "average"
+
+    GameAnalysis:
+      type: object
+      properties:
+        match_id:
+          type: string
+          example: "8617881215"
+        hero:
+          type: string
+          example: "Invoker"
+        role:
+          type: string
+          example: "Hard Support"
+        result:
+          type: string
+          enum: ["win", "loss"]
+          example: "loss"
+        stats:
+          $ref: '#/components/schemas/SessionAverages'
+
+    HeroUtilization:
+      type: object
+      properties:
+        games_played:
+          type: integer
+          example: 3
+        wins:
+          type: integer
+          example: 1
+        win_rate:
+          type: number
+          example: 0.333
+        avg_performance:
+          $ref: '#/components/schemas/SessionAverages'
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "healthy"
+        service:
+          type: string
+          example: "session-summary"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-02-23T12:19:29.058196Z"
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        success:
+          type: boolean
+          example: false
