@@ -183,6 +183,18 @@
         <a href="./benchmarks/">View Benchmark Docs →</a>
       </div>
 
+      <div class="card">
+        <h2><span class="icon">📝</span> Session Summary API</h2>
+        <p>Post-session LLM-powered analysis. Submit match stats after a session ends and receive AI-generated coaching insights.</p>
+        <ul class="features">
+          <li>POST /session-summary - Submit matches for analysis</li>
+          <li>GET /session-summary/{task_id} - Poll for result</li>
+          <li>Async pattern: 202 → poll → result</li>
+          <li>AI coaching summary via Claude</li>
+        </ul>
+        <a href="./session-summary/">View Session Summary API →</a>
+      </div>
+
     </div>
 
     <footer>

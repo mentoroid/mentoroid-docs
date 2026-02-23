@@ -34,6 +34,21 @@
           "source": "api/openapi.yaml"
         }
       ]
+    },
+    "Session Summary": {
+      "description": "Post-session LLM-powered analysis and coaching summary",
+      "endpoints": [
+        {
+          "path": "/session-summary",
+          "method": "POST",
+          "source": "session-summary/openapi.yaml"
+        },
+        {
+          "path": "/session-summary/{task_id}",
+          "method": "GET",
+          "source": "session-summary/openapi.yaml"
+        }
+      ]
     }
   },
   "_internal": {
