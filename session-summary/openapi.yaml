@@ -94,10 +94,8 @@ info:
     name: Proprietary
 
 servers:
-  - url: https://session-summary-dev.mentoroid.ai
+  - url: https://session-summary-dev-osoplb35na-as.a.run.app
     description: Session Summary (Dev)
-  - url: https://session-summary.mentoroid.ai
-    description: Session Summary (Prod)
 
 tags:
   - name: Session Summary
@@ -175,7 +173,7 @@ paths:
                   kda: 3.33
                   kill_participant: 45.5
                   death_participant: 25.0
-                session_benchmarks:
+                benchmarks:
                   xpm: 350
                   net_worth: 7800
                   last_hits: 35
@@ -202,7 +200,7 @@ paths:
                   kda: 6.67
                   kill_participant: 65.0
                   death_participant: 15.0
-                session_benchmarks:
+                benchmarks:
                   xpm: 500
                   net_worth: 14000
                   last_hits: 150
@@ -562,32 +560,41 @@ components:
         benchmarks:
           type: object
           description: |
-            Hero/role benchmark data for comparison. Keyed by hero name, then by role.
+            Flat benchmark stats for this match's hero/role at the player's rank bracket.
+            The service internally maps each match's benchmarks to the correct hero+role.
 
-            Example: `{"Invoker": {"Hard Support": {xpm: 350, ...}}}`
-          additionalProperties:
-            type: object
-            additionalProperties:
-              type: object
-              properties:
-                xpm:
-                  type: number
-                net_worth:
-                  type: integer
-                last_hits:
-                  type: integer
-                denies:
-                  type: integer
-                kills:
-                  type: integer
-                deaths:
-                  type: integer
-                assists:
-                  type: integer
-                kill_participation:
-                  type: number
-                death_participation:
-                  type: number
+            Example: `{"xpm": 350, "net_worth": 7800, "kills": 3, ...}`
+          properties:
+            xpm:
+              type: number
+              example: 350
+            net_worth:
+              type: integer
+              example: 7800
+            last_hits:
+              type: integer
+              example: 35
+            denies:
+              type: integer
+              example: 2
+            kills:
+              type: integer
+              example: 3
+            deaths:
+              type: integer
+              example: 5
+            assists:
+              type: integer
+              example: 16
+            gpm:
+              type: number
+              example: 290
+            kill_participation:
+              type: number
+              example: 50.0
+            death_participation:
+              type: number
+              example: 28.0
 
     TaskSubmitted:
       type: object
