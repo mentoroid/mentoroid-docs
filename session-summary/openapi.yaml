@@ -94,14 +94,8 @@ info:
     name: Proprietary
 
 servers:
-  - url: https://session-summary-dev-HASH-as.a.run.app
-    description: |
-      Session Summary (Dev) — replace with actual Cloud Run URL.
-      Run: gcloud run services describe session-summary --region=asia-southeast1 --format='value(status.url)' --project=mentoroid-dev
-  - url: https://session-summary-prod-HASH-as.a.run.app
-    description: |
-      Session Summary (Prod) — replace with actual Cloud Run URL.
-      Run: gcloud run services describe session-summary --region=asia-southeast1 --format='value(status.url)' --project=mentoroid-prod
+  - url: https://session-summary-dev-osoplb35na-as.a.run.app
+    description: Session Summary (Dev)
 
 tags:
   - name: Session Summary
