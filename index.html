@@ -184,6 +184,18 @@
       </div>
 
       <div class="card">
+        <h2><span class="icon">🎯</span> Goal Setting API</h2>
+        <p>Pre-game focus area generation. After each match analysis, generates personalized improvement areas per role using LLM insights.</p>
+        <ul class="features">
+          <li>POST /goal-setting - Generate focus areas</li>
+          <li>Auto-detects roles from player profile</li>
+          <li>Personalized (LLM) or static tips</li>
+          <li>Output: goal_setting/{steam_id}/{match_id}.json</li>
+        </ul>
+        <a href="./goal-setting/">View Goal Setting API →</a>
+      </div>
+
+      <div class="card">
         <h2><span class="icon">📝</span> Session Summary API</h2>
         <p>Post-session LLM-powered analysis. Submit match stats after a session ends and receive AI-generated coaching insights.</p>
         <ul class="features">
