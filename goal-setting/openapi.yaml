@@ -168,6 +168,13 @@ paths:
                       - "Reduce unnecessary deaths in the mid-game (15-25 min). You average 3.2 deaths in this window vs 2.1 benchmark."
                       - "Improve your net worth timing — aim for a 12-minute power spike item. Your average completion is 14:30."
                       - "Work on fight selection: your kill participation drops to 35% when behind, suggesting you take bad fights."
+                    comfort_heroes:
+                      - hero_name: "Anti-Mage"
+                        games_played: 8
+                      - hero_name: "Phantom Assassin"
+                        games_played: 5
+                      - hero_name: "Juggernaut"
+                        games_played: 3
                     games_analyzed: 15
                     win_rate: 53.3
                     personalized: true
@@ -177,6 +184,13 @@ paths:
                       - "Your tower damage is 40% below benchmark. Look for split-push opportunities after winning fights."
                       - "Practice last-hitting under tower. Your CS drops 25% when pressured in lane."
                       - "Rotate to side lanes earlier. Your first rotation averages 12 minutes vs 9 min benchmark."
+                    comfort_heroes:
+                      - hero_name: "Invoker"
+                        games_played: 5
+                      - hero_name: "Storm Spirit"
+                        games_played: 3
+                      - hero_name: "Templar Assassin"
+                        games_played: 2
                     games_analyzed: 8
                     win_rate: 62.5
                     personalized: true
@@ -424,6 +438,30 @@ components:
             - "Reduce unnecessary deaths in the mid-game."
             - "Improve your net worth timing for power spike items."
             - "Work on fight selection when behind."
+        comfort_heroes:
+          type: array
+          description: |
+            Top 3 most played heroes for this role, sorted by games played descending.
+            Derived from the player's manifest match history.
+          maxItems: 3
+          items:
+            type: object
+            properties:
+              hero_name:
+                type: string
+                description: Hero display name
+                example: "Anti-Mage"
+              games_played:
+                type: integer
+                description: Number of matches played with this hero in this role
+                example: 8
+          example:
+            - hero_name: "Anti-Mage"
+              games_played: 8
+            - hero_name: "Phantom Assassin"
+              games_played: 5
+            - hero_name: "Juggernaut"
+              games_played: 3
         games_analyzed:
           type: integer
           description: Number of matches analyzed for this role
