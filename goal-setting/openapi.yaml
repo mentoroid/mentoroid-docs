@@ -101,6 +101,9 @@ servers:
   - url: https://goal-setting-dev-osoplb35na-as.a.run.app
     description: Goal Setting (Dev)
 
+security:
+  - ApiKeyAuth: []
+
 tags:
   - name: Goal Setting
     description: |
@@ -165,6 +168,13 @@ paths:
                       - "Reduce unnecessary deaths in the mid-game (15-25 min). You average 3.2 deaths in this window vs 2.1 benchmark."
                       - "Improve your net worth timing — aim for a 12-minute power spike item. Your average completion is 14:30."
                       - "Work on fight selection: your kill participation drops to 35% when behind, suggesting you take bad fights."
+                    comfort_heroes:
+                      - hero_name: "Anti-Mage"
+                        games_played: 8
+                      - hero_name: "Phantom Assassin"
+                        games_played: 5
+                      - hero_name: "Juggernaut"
+                        games_played: 3
                     games_analyzed: 15
                     win_rate: 53.3
                     personalized: true
@@ -174,6 +184,13 @@ paths:
                       - "Your tower damage is 40% below benchmark. Look for split-push opportunities after winning fights."
                       - "Practice last-hitting under tower. Your CS drops 25% when pressured in lane."
                       - "Rotate to side lanes earlier. Your first rotation averages 12 minutes vs 9 min benchmark."
+                    comfort_heroes:
+                      - hero_name: "Invoker"
+                        games_played: 5
+                      - hero_name: "Storm Spirit"
+                        games_played: 3
+                      - hero_name: "Templar Assassin"
+                        games_played: 2
                     games_analyzed: 8
                     win_rate: 62.5
                     personalized: true
@@ -200,6 +217,15 @@ paths:
                   value:
                     error: "No roles provided and no role data in player profile. Provide roles in the request or ensure the player has a profile."
                     success: false
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Invalid API key. Include a valid X-API-Key header."
+                success: false
         '404':
           description: Player data not found
           content:
@@ -293,6 +319,7 @@ paths:
 
         Used by Cloud Run health checks and monitoring.
       operationId: healthCheck
+      security: []
       responses:
         '200':
           description: Service is healthy
@@ -306,6 +333,16 @@ paths:
                 timestamp: "2026-02-25T10:30:00.000000Z"
 
 components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key for authentication. Obtained via Steam login on the Mentoroid app.
+        Format: `mk_<32 hex chars>` (Steam auth) or `key-<32 hex chars>` (legacy admin).
+        Validated against Firebase Firestore `api_keys` collection.
+
   schemas:
     GoalSettingRequest:
       type: object
@@ -401,6 +438,30 @@ components:
             - "Reduce unnecessary deaths in the mid-game."
             - "Improve your net worth timing for power spike items."
             - "Work on fight selection when behind."
+        comfort_heroes:
+          type: array
+          description: |
+            Top 3 most played heroes for this role, sorted by games played descending.
+            Derived from the player's manifest match history.
+          maxItems: 3
+          items:
+            type: object
+            properties:
+              hero_name:
+                type: string
+                description: Hero display name
+                example: "Anti-Mage"
+              games_played:
+                type: integer
+                description: Number of matches played with this hero in this role
+                example: 8
+          example:
+            - hero_name: "Anti-Mage"
+              games_played: 8
+            - hero_name: "Phantom Assassin"
+              games_played: 5
+            - hero_name: "Juggernaut"
+              games_played: 3
         games_analyzed:
           type: integer
           description: Number of matches analyzed for this role
