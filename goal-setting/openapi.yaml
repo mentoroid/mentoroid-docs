@@ -120,12 +120,13 @@ paths:
         Generate personalized pre-game focus areas for a player's roles.
 
         ## Flow
-        1. Resolve roles (from request or player profile)
-        2. Read rank from player profile
-        3. Load manifest and filter matches by role (last 20)
-        4. If < 5 matches for a role: return static tips (no LLM)
-        5. If >= 5 matches: load Stage 1 outputs, aggregate stats, generate via LLM
-        6. Save result to GCS and return
+        1. Resolve match_id (from request, or latest successful match from manifest)
+        2. Resolve roles (from request or player profile)
+        3. Read rank from player profile
+        4. Load manifest and filter matches by role (last 20)
+        5. If < 5 matches for a role: return static tips (no LLM)
+        6. If >= 5 matches: load Stage 1 outputs, aggregate stats, generate via LLM
+        7. Save result to GCS and return
 
         ## Roles
         - If `roles` is provided, use those (1-2 roles)
@@ -144,7 +145,6 @@ paths:
               $ref: '#/components/schemas/GoalSettingRequest'
             example:
               steam_id: "76561198432333227"
-              match_id: "8577546204"
       responses:
         '200':
           description: Focus areas generated successfully
@@ -189,11 +189,6 @@ paths:
                   summary: Missing steam_id
                   value:
                     error: "Missing required parameter: steam_id"
-                    success: false
-                missing_match_id:
-                  summary: Missing match_id
-                  value:
-                    error: "Missing required parameter: match_id"
                     success: false
                 invalid_role:
                   summary: Invalid role
@@ -316,7 +311,6 @@ components:
       type: object
       required:
         - steam_id
-        - match_id
       properties:
         steam_id:
           type: string
@@ -327,8 +321,9 @@ components:
         match_id:
           type: string
           description: |
-            Match ID that triggered this generation. Must be a numeric Dota match ID
-            (7-13 digits). The goal-setting output is keyed by this match_id.
+            Match ID to generate focus areas for. Must be a numeric Dota match ID (7-13 digits).
+            **Optional** — if omitted, the latest successful match from the player's manifest is used.
+            The goal-setting output is keyed by this match_id.
           example: "8577546204"
         roles:
           type: array
@@ -364,7 +359,7 @@ components:
           example: "76561198432333227"
         match_id:
           type: string
-          description: Match that triggered this generation
+          description: Match ID used for generation (from request or auto-resolved from manifest)
           example: "8577546204"
         roles_source:
           type: string
