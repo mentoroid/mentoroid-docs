@@ -101,6 +101,9 @@ servers:
   - url: https://goal-setting-dev-osoplb35na-as.a.run.app
     description: Goal Setting (Dev)
 
+security:
+  - ApiKeyAuth: []
+
 tags:
   - name: Goal Setting
     description: |
@@ -200,6 +203,15 @@ paths:
                   value:
                     error: "No roles provided and no role data in player profile. Provide roles in the request or ensure the player has a profile."
                     success: false
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Invalid API key. Include a valid X-API-Key header."
+                success: false
         '404':
           description: Player data not found
           content:
@@ -293,6 +305,7 @@ paths:
 
         Used by Cloud Run health checks and monitoring.
       operationId: healthCheck
+      security: []
       responses:
         '200':
           description: Service is healthy
@@ -306,6 +319,16 @@ paths:
                 timestamp: "2026-02-25T10:30:00.000000Z"
 
 components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key for authentication. Obtained via Steam login on the Mentoroid app.
+        Format: `mk_<32 hex chars>` (Steam auth) or `key-<32 hex chars>` (legacy admin).
+        Validated against Firebase Firestore `api_keys` collection.
+
   schemas:
     GoalSettingRequest:
       type: object
