@@ -1,0 +1,472 @@
+openapi: 3.0.3
+info:
+  title: Mentoroid Goal Setting API
+  description: |
+    Pre-game focus area generation for Dota 2 players.
+
+    ## Overview
+
+    After each match is analyzed by the PGA pipeline (Stage 1), the Goal Setting service
+    generates personalized focus areas for the player's top roles. These focus areas help
+    players improve by highlighting specific areas to work on in their next game.
+
+    ## Architecture
+
+    | Component | Detail |
+    |-----------|--------|
+    | **Type** | Cloud Run service |
+    | **LLM** | Claude (Anthropic) via `llm_framework` |
+    | **Auth** | IAM service-to-service (internal), `X-API-Key` (external) |
+    | **Trigger** | Called by `match_insights_handler` after Stage 1 output is saved |
+
+    ## Pipeline Flow
+
+    ```
+    ┌────────────────────┐     ┌───────────────────┐     ┌──────────────┐
+    │ match_insights     │     │   Goal Setting     │     │    Claude    │
+    │ handler (CF)       │     │   (Cloud Run)      │     │    (LLM)     │
+    └────────┬───────────┘     └─────────┬─────────┘     └──────┬───────┘
+             │                           │                      │
+             │ 1. Save output_llm/       │                      │
+             │    {match_id}.json        │                      │
+             │                           │                      │
+             │ 2. POST /goal-setting     │                      │
+             │    {steam_id, match_id}   │                      │
+             │ ─────────────────────────>│                      │
+             │                           │                      │
+             │                           │ 3. Load profile      │
+             │                           │    (roles, rank)     │
+             │                           │                      │
+             │                           │ 4. Load manifest     │
+             │                           │    + Stage 1 outputs │
+             │                           │                      │
+             │                           │ 5. Generate goals    │
+             │                           │ ────────────────────>│
+             │                           │                      │
+             │                           │ 6. Focus areas       │
+             │                           │ <────────────────────│
+             │                           │                      │
+             │                           │ 7. Save to GCS       │
+             │                           │    goal_setting/     │
+             │                           │    {steam_id}/       │
+             │                           │    {match_id}.json   │
+             │                           │                      │
+             │ 8. 200 OK {goals}         │                      │
+             │ <─────────────────────────│                      │
+    ```
+
+    ## Role Resolution
+
+    Roles are resolved in this order:
+    1. **Explicit** - `roles` array in the request body (1-2 roles)
+    2. **Auto-detected** - Top 2 roles from the player's profile `role_distribution`
+
+    If neither is available, the request returns 400.
+
+    ## Personalization Threshold
+
+    | Matches for Role | Behavior |
+    |-----------------|----------|
+    | < 5 | Static tips from `new_to_role.json` (no LLM) |
+    | >= 5 | Personalized focus areas via LLM (last 20 matches) |
+
+    ## GCS Output
+
+    Results are saved to: `goal_setting/{steam_id}/{match_id}.json`
+
+    Each match produces its own file, enabling tracking of how focus areas evolve over time.
+
+    ## Base URLs
+
+    | Environment | Base URL |
+    |-------------|----------|
+    | Dev | `https://goal-setting-dev-<hash>.a.run.app` |
+
+    > Run `gcloud run services describe goal-setting-dev --region=asia-southeast1 --format='value(status.url)'`
+    > to get the actual URL.
+
+    ## Authentication
+
+    - **Internal (pipeline):** IAM service-to-service with ID token (automatic)
+    - **External:** `X-API-Key` header (Firestore-backed), same as other Mentoroid APIs
+
+  version: 1.0.0
+  contact:
+    name: Mentoroid Team
+    email: dev@mentoroid.ai
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://goal-setting-dev-osoplb35na-as.a.run.app
+    description: Goal Setting (Dev)
+
+tags:
+  - name: Goal Setting
+    description: |
+      Generate personalized pre-game focus areas per role.
+
+      **Type:** Cloud Run service (synchronous)
+  - name: Health
+    description: Service health check
+
+paths:
+  /goal-setting:
+    post:
+      tags:
+        - Goal Setting
+      summary: Generate focus areas
+      description: |
+        Generate personalized pre-game focus areas for a player's roles.
+
+        ## Flow
+        1. Resolve roles (from request or player profile)
+        2. Read rank from player profile
+        3. Load manifest and filter matches by role (last 20)
+        4. If < 5 matches for a role: return static tips (no LLM)
+        5. If >= 5 matches: load Stage 1 outputs, aggregate stats, generate via LLM
+        6. Save result to GCS and return
+
+        ## Roles
+        - If `roles` is provided, use those (1-2 roles)
+        - If omitted, auto-detect top 2 roles from player profile `role_distribution`
+        - Valid roles: `carry`, `mid`, `offlane`, `soft_support`, `hard_support`
+
+        ## Rank
+        Rank is always read from the player's profile (`extracted_rank`), not from the request.
+        Any `rank` field in the request body is ignored.
+      operationId: generateGoalSetting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoalSettingRequest'
+            example:
+              steam_id: "76561198432333227"
+              match_id: "8577546204"
+      responses:
+        '200':
+          description: Focus areas generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalSettingResponse'
+              example:
+                success: true
+                steam_id: "76561198432333227"
+                match_id: "8577546204"
+                roles_source: "profile"
+                rank: "legend"
+                goals:
+                  carry:
+                    focus_areas:
+                      - "Focus on maintaining 60+ last hits by 10 minutes — your average is 48, well below the Legend benchmark of 62."
+                      - "Reduce unnecessary deaths in the mid-game (15-25 min). You average 3.2 deaths in this window vs 2.1 benchmark."
+                      - "Improve your net worth timing — aim for a 12-minute power spike item. Your average completion is 14:30."
+                      - "Work on fight selection: your kill participation drops to 35% when behind, suggesting you take bad fights."
+                    games_analyzed: 15
+                    win_rate: 53.3
+                    personalized: true
+                  mid:
+                    focus_areas:
+                      - "Prioritize rune control — contest at least 4 of the first 6 bounty/water runes."
+                      - "Your tower damage is 40% below benchmark. Look for split-push opportunities after winning fights."
+                      - "Practice last-hitting under tower. Your CS drops 25% when pressured in lane."
+                      - "Rotate to side lanes earlier. Your first rotation averages 12 minutes vs 9 min benchmark."
+                    games_analyzed: 8
+                    win_rate: 62.5
+                    personalized: true
+                gcs_path: "gs://mentoroid-pga-dev/userdata/dota2/goal_setting/76561198432333227/8577546204.json"
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missing_steam_id:
+                  summary: Missing steam_id
+                  value:
+                    error: "Missing required parameter: steam_id"
+                    success: false
+                missing_match_id:
+                  summary: Missing match_id
+                  value:
+                    error: "Missing required parameter: match_id"
+                    success: false
+                invalid_role:
+                  summary: Invalid role
+                  value:
+                    error: "Invalid role: jungle. Valid roles: carry, mid, offlane, soft_support, hard_support"
+                    success: false
+                no_roles:
+                  summary: No roles available
+                  value:
+                    error: "No roles provided and no role data in player profile. Provide roles in the request or ensure the player has a profile."
+                    success: false
+        '404':
+          description: Player data not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "No player data found for steam_id: 76561198432333227"
+                success: false
+        '405':
+          description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Method not allowed. Use POST."
+                success: false
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Internal server error. Please try again later."
+                success: false
+
+  /goal-setting-pubsub:
+    post:
+      tags:
+        - Goal Setting
+      summary: Pub/Sub push endpoint
+      description: |
+        Accepts Pub/Sub push subscription messages. Unwraps the envelope and
+        forwards to the main `/goal-setting` handler.
+
+        **This is an internal endpoint** used by the Pub/Sub push subscription.
+        External callers should use `POST /goal-setting` directly.
+
+        ## Pub/Sub Envelope Format
+        ```json
+        {
+          "message": {
+            "data": "<base64-encoded JSON>",
+            "messageId": "...",
+            "publishTime": "..."
+          },
+          "subscription": "projects/.../subscriptions/..."
+        }
+        ```
+
+        The base64-decoded `data` field must contain:
+        ```json
+        {
+          "steam_id": "76561198432333227",
+          "match_id": "8577546204"
+        }
+        ```
+      operationId: goalSettingPubSub
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PubSubEnvelope'
+      responses:
+        '200':
+          description: Goal setting completed (same response as /goal-setting)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoalSettingResponse'
+        '400':
+          description: Invalid Pub/Sub message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Invalid Pub/Sub message: missing data"
+                success: false
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: |
+        Returns service health status. No authentication required.
+
+        Used by Cloud Run health checks and monitoring.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "healthy"
+                service: "goal-setting-v2"
+                timestamp: "2026-02-25T10:30:00.000000Z"
+
+components:
+  schemas:
+    GoalSettingRequest:
+      type: object
+      required:
+        - steam_id
+        - match_id
+      properties:
+        steam_id:
+          type: string
+          description: |
+            Player's Steam64 ID (string to avoid JavaScript integer precision loss).
+            Numeric-only, typically 17 digits.
+          example: "76561198432333227"
+        match_id:
+          type: string
+          description: |
+            Match ID that triggered this generation. Must be a numeric Dota match ID
+            (7-13 digits). The goal-setting output is keyed by this match_id.
+          example: "8577546204"
+        roles:
+          type: array
+          minItems: 1
+          maxItems: 2
+          description: |
+            Roles to generate focus areas for (1-2). If omitted, auto-detected
+            from the player's profile `role_distribution` (top 2 by game count).
+          items:
+            type: string
+            enum:
+              - carry
+              - mid
+              - offlane
+              - soft_support
+              - hard_support
+          example: ["carry", "mid"]
+        save_to_gcs:
+          type: boolean
+          default: true
+          description: |
+            Whether to save the result to GCS. Set `false` for dry-run / testing.
+
+    GoalSettingResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        steam_id:
+          type: string
+          description: Player's Steam64 ID
+          example: "76561198432333227"
+        match_id:
+          type: string
+          description: Match that triggered this generation
+          example: "8577546204"
+        roles_source:
+          type: string
+          enum: ["profile", "request"]
+          description: |
+            How roles were resolved:
+            - `profile` — auto-detected from player profile
+            - `request` — explicitly provided in the request body
+          example: "profile"
+        rank:
+          type: string
+          nullable: true
+          description: Player's rank from profile (null if unavailable)
+          enum: [herald, guardian, crusader, archon, legend, ancient, divine, immortal]
+          example: "legend"
+        goals:
+          type: object
+          description: |
+            Focus areas per role. Keys are canonical role names.
+          additionalProperties:
+            $ref: '#/components/schemas/RoleGoal'
+        gcs_path:
+          type: string
+          description: GCS path where the result was saved (only if save_to_gcs=true)
+          example: "gs://mentoroid-pga-dev/userdata/dota2/goal_setting/76561198432333227/8577546204.json"
+
+    RoleGoal:
+      type: object
+      properties:
+        focus_areas:
+          type: array
+          description: |
+            4 actionable focus areas for this role. Generated by LLM if personalized,
+            or loaded from static tips if the player has < 5 matches for this role.
+          items:
+            type: string
+          example:
+            - "Focus on maintaining 60+ last hits by 10 minutes."
+            - "Reduce unnecessary deaths in the mid-game."
+            - "Improve your net worth timing for power spike items."
+            - "Work on fight selection when behind."
+        games_analyzed:
+          type: integer
+          description: Number of matches analyzed for this role
+          example: 15
+        win_rate:
+          type: number
+          format: float
+          description: Win rate for this role (only present when personalized=true)
+          example: 53.3
+        personalized:
+          type: boolean
+          description: |
+            `true` if focus areas were generated by LLM from the player's match history.
+            `false` if static tips were used (< 5 matches for this role).
+          example: true
+        data_available:
+          type: boolean
+          description: |
+            Only present when `personalized=false` and no static tips could be loaded.
+            Indicates the fallback data source is also unavailable.
+          example: false
+
+    PubSubEnvelope:
+      type: object
+      description: Standard Pub/Sub push subscription envelope
+      properties:
+        message:
+          type: object
+          properties:
+            data:
+              type: string
+              format: byte
+              description: Base64-encoded JSON payload
+            messageId:
+              type: string
+            publishTime:
+              type: string
+              format: date-time
+        subscription:
+          type: string
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "healthy"
+        service:
+          type: string
+          example: "goal-setting-v2"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-02-25T10:30:00.000000Z"
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        success:
+          type: boolean
+          example: false

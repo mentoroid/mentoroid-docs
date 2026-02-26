@@ -35,6 +35,16 @@
         }
       ]
     },
+    "Goal Setting": {
+      "description": "Pre-game focus areas generated per role after each match analysis",
+      "endpoints": [
+        {
+          "path": "/goal-setting",
+          "method": "POST",
+          "source": "goal-setting/openapi.yaml"
+        }
+      ]
+    },
     "Session Summary": {
       "description": "Post-session LLM-powered analysis and coaching summary",
       "endpoints": [
