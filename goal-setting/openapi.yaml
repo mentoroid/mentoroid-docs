@@ -138,16 +138,55 @@ paths:
 
         ## Rank
         Rank is always read from the player's profile (`extracted_rank`), not from the request.
-        Any `rank` field in the request body is ignored.
       operationId: generateGoalSetting
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GoalSettingRequest'
-            example:
-              steam_id: "76561198432333227"
+      parameters:
+        - name: steam_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: |
+            Player's Steam64 ID (string to avoid JavaScript integer precision loss).
+            Numeric-only, typically 17 digits.
+          example: "76561198432333227"
+        - name: match_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Match ID to generate focus areas for. Must be a numeric Dota match ID (7-13 digits).
+            **Optional** — if omitted, the latest successful match from the player's manifest is used.
+          example: "8577546204"
+        - name: roles
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 2
+            items:
+              type: string
+              enum:
+                - carry
+                - mid
+                - offlane
+                - soft_support
+                - hard_support
+          description: |
+            Roles to generate focus areas for (1-2). Repeat the param for multiple roles:
+            `?roles=carry&roles=mid`. If omitted, auto-detected from the player's profile
+            `role_distribution` (top 2 by game count).
+          example: ["carry", "mid"]
+        - name: save_to_gcs
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+          description: Whether to save the result to GCS. Set `false` for dry-run / testing.
       responses:
         '200':
           description: Focus areas generated successfully
@@ -344,46 +383,6 @@ components:
         Validated against Firebase Firestore `api_keys` collection.
 
   schemas:
-    GoalSettingRequest:
-      type: object
-      required:
-        - steam_id
-      properties:
-        steam_id:
-          type: string
-          description: |
-            Player's Steam64 ID (string to avoid JavaScript integer precision loss).
-            Numeric-only, typically 17 digits.
-          example: "76561198432333227"
-        match_id:
-          type: string
-          description: |
-            Match ID to generate focus areas for. Must be a numeric Dota match ID (7-13 digits).
-            **Optional** — if omitted, the latest successful match from the player's manifest is used.
-            The goal-setting output is keyed by this match_id.
-          example: "8577546204"
-        roles:
-          type: array
-          minItems: 1
-          maxItems: 2
-          description: |
-            Roles to generate focus areas for (1-2). If omitted, auto-detected
-            from the player's profile `role_distribution` (top 2 by game count).
-          items:
-            type: string
-            enum:
-              - carry
-              - mid
-              - offlane
-              - soft_support
-              - hard_support
-          example: ["carry", "mid"]
-        save_to_gcs:
-          type: boolean
-          default: true
-          description: |
-            Whether to save the result to GCS. Set `false` for dry-run / testing.
-
     GoalSettingResponse:
       type: object
       properties:
