@@ -180,13 +180,6 @@ paths:
             `?roles=carry&roles=mid`. If omitted, auto-detected from the player's profile
             `role_distribution` (top 2 by game count).
           example: ["carry", "mid"]
-        - name: save_to_gcs
-          in: query
-          required: false
-          schema:
-            type: boolean
-            default: true
-          description: Whether to save the result to GCS. Set `false` for dry-run / testing.
       responses:
         '200':
           description: Focus areas generated successfully
@@ -419,7 +412,7 @@ components:
             $ref: '#/components/schemas/RoleGoal'
         gcs_path:
           type: string
-          description: GCS path where the result was saved (only if save_to_gcs=true)
+          description: GCS path where the result was saved
           example: "gs://mentoroid-pga-dev/userdata/dota2/goal_setting/76561198432333227/8577546204.json"
 
     RoleGoal:
