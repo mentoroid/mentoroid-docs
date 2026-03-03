@@ -57,11 +57,8 @@ info:
 
     ## Role Resolution
 
-    Roles are resolved in this order:
-    1. **Explicit** - `roles` array in the request body (1-2 roles)
-    2. **Auto-detected** - Top 2 roles from the player's profile `role_distribution`
-
-    If neither is available, the request returns 400.
+    `roles` is a **required** query parameter. The request returns 400 if omitted.
+    Provide 1-2 roles, e.g., `?roles=carry&roles=mid`.
 
     ## Personalization Threshold
 
@@ -132,8 +129,7 @@ paths:
         7. Save result to GCS and return
 
         ## Roles
-        - If `roles` is provided, use those (1-2 roles)
-        - If omitted, auto-detect top 2 roles from player profile `role_distribution`
+        - `roles` is **required** (1-2 roles). Returns 400 if omitted.
         - Valid roles: `carry`, `mid`, `offlane`, `soft_support`, `hard_support`
 
         ## Rank
@@ -160,7 +156,7 @@ paths:
           example: "8577546204"
         - name: roles
           in: query
-          required: false
+          required: true
           style: form
           explode: true
           schema:
@@ -177,8 +173,7 @@ paths:
                 - hard_support
           description: |
             Roles to generate focus areas for (1-2). Repeat the param for multiple roles:
-            `?roles=carry&roles=mid`. If omitted, auto-detected from the player's profile
-            `role_distribution` (top 2 by game count).
+            `?roles=carry&roles=mid`. Required — the request returns 400 if omitted.
           example: ["carry", "mid"]
       responses:
         '200':
@@ -191,7 +186,7 @@ paths:
                 success: true
                 steam_id: "76561198432333227"
                 match_id: "8577546204"
-                roles_source: "profile"
+                roles_source: "request"
                 rank: "legend"
                 goals:
                   carry:
@@ -245,9 +240,9 @@ paths:
                     error: "Invalid role: jungle. Valid roles: carry, mid, offlane, soft_support, hard_support"
                     success: false
                 no_roles:
-                  summary: No roles available
+                  summary: Missing roles parameter
                   value:
-                    error: "No roles provided and no role data in player profile. Provide roles in the request or ensure the player has a profile."
+                    error: "Missing required parameter: roles. Provide at least one role, e.g., ?roles=carry"
                     success: false
         '401':
           description: Unauthorized
@@ -392,12 +387,10 @@ components:
           example: "8577546204"
         roles_source:
           type: string
-          enum: ["profile", "request"]
+          enum: ["request"]
           description: |
-            How roles were resolved:
-            - `profile` — auto-detected from player profile
-            - `request` — explicitly provided in the request body
-          example: "profile"
+            How roles were resolved. Always `request` — roles are a required query parameter.
+          example: "request"
         rank:
           type: string
           nullable: true
