@@ -57,11 +57,8 @@ info:
 
     ## Role Resolution
 
-    Roles are resolved in this order:
-    1. **Explicit** - `roles` array in the request body (1-2 roles)
-    2. **Auto-detected** - Top 2 roles from the player's profile `role_distribution`
-
-    If neither is available, the request returns 400.
+    `roles` is a **required** query parameter. The request returns 400 if omitted.
+    Provide 1-2 roles, e.g., `?roles=carry&roles=mid`.
 
     ## Personalization Threshold
 
@@ -124,7 +121,7 @@ paths:
 
         ## Flow
         1. Resolve match_id (from request, or latest successful match from manifest)
-        2. Resolve roles (from request or player profile)
+        2. Validate roles (required query param — returns 400 if omitted)
         3. Read rank from player profile
         4. Load manifest and filter matches by role (last 20)
         5. If < 5 matches for a role: return static tips (no LLM)
@@ -132,22 +129,52 @@ paths:
         7. Save result to GCS and return
 
         ## Roles
-        - If `roles` is provided, use those (1-2 roles)
-        - If omitted, auto-detect top 2 roles from player profile `role_distribution`
+        - `roles` is **required** (1-2 roles). Returns 400 if omitted.
         - Valid roles: `carry`, `mid`, `offlane`, `soft_support`, `hard_support`
 
         ## Rank
         Rank is always read from the player's profile (`extracted_rank`), not from the request.
-        Any `rank` field in the request body is ignored.
       operationId: generateGoalSetting
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GoalSettingRequest'
-            example:
-              steam_id: "76561198432333227"
+      parameters:
+        - name: steam_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: |
+            Player's Steam64 ID (string to avoid JavaScript integer precision loss).
+            Numeric-only, typically 17 digits.
+          example: "76561198432333227"
+        - name: match_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Match ID to generate focus areas for. Must be a numeric Dota match ID (7-13 digits).
+            **Optional** — if omitted, the latest successful match from the player's manifest is used.
+          example: "8577546204"
+        - name: roles
+          in: query
+          required: true
+          style: form
+          explode: true
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 2
+            items:
+              type: string
+              enum:
+                - carry
+                - mid
+                - offlane
+                - soft_support
+                - hard_support
+          description: |
+            Roles to generate focus areas for (1-2). Repeat the param for multiple roles:
+            `?roles=carry&roles=mid`. Required — the request returns 400 if omitted.
+          example: ["carry", "mid"]
       responses:
         '200':
           description: Focus areas generated successfully
@@ -159,7 +186,7 @@ paths:
                 success: true
                 steam_id: "76561198432333227"
                 match_id: "8577546204"
-                roles_source: "profile"
+                roles_source: "request"
                 rank: "legend"
                 goals:
                   carry:
@@ -213,9 +240,9 @@ paths:
                     error: "Invalid role: jungle. Valid roles: carry, mid, offlane, soft_support, hard_support"
                     success: false
                 no_roles:
-                  summary: No roles available
+                  summary: Missing roles parameter
                   value:
-                    error: "No roles provided and no role data in player profile. Provide roles in the request or ensure the player has a profile."
+                    error: "Missing required parameter: roles. Provide at least one role, e.g., ?roles=carry"
                     success: false
         '401':
           description: Unauthorized
@@ -344,46 +371,6 @@ components:
         Validated against Firebase Firestore `api_keys` collection.
 
   schemas:
-    GoalSettingRequest:
-      type: object
-      required:
-        - steam_id
-      properties:
-        steam_id:
-          type: string
-          description: |
-            Player's Steam64 ID (string to avoid JavaScript integer precision loss).
-            Numeric-only, typically 17 digits.
-          example: "76561198432333227"
-        match_id:
-          type: string
-          description: |
-            Match ID to generate focus areas for. Must be a numeric Dota match ID (7-13 digits).
-            **Optional** — if omitted, the latest successful match from the player's manifest is used.
-            The goal-setting output is keyed by this match_id.
-          example: "8577546204"
-        roles:
-          type: array
-          minItems: 1
-          maxItems: 2
-          description: |
-            Roles to generate focus areas for (1-2). If omitted, auto-detected
-            from the player's profile `role_distribution` (top 2 by game count).
-          items:
-            type: string
-            enum:
-              - carry
-              - mid
-              - offlane
-              - soft_support
-              - hard_support
-          example: ["carry", "mid"]
-        save_to_gcs:
-          type: boolean
-          default: true
-          description: |
-            Whether to save the result to GCS. Set `false` for dry-run / testing.
-
     GoalSettingResponse:
       type: object
       properties:
@@ -400,12 +387,10 @@ components:
           example: "8577546204"
         roles_source:
           type: string
-          enum: ["profile", "request"]
+          enum: ["request"]
           description: |
-            How roles were resolved:
-            - `profile` — auto-detected from player profile
-            - `request` — explicitly provided in the request body
-          example: "profile"
+            How roles were resolved. Always `request` — roles are a required query parameter.
+          example: "request"
         rank:
           type: string
           nullable: true
@@ -420,7 +405,7 @@ components:
             $ref: '#/components/schemas/RoleGoal'
         gcs_path:
           type: string
-          description: GCS path where the result was saved (only if save_to_gcs=true)
+          description: GCS path where the result was saved
           example: "gs://mentoroid-pga-dev/userdata/dota2/goal_setting/76561198432333227/8577546204.json"
 
     RoleGoal:
