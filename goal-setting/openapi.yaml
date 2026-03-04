@@ -121,7 +121,7 @@ paths:
 
         ## Flow
         1. Resolve match_id (from request, or latest successful match from manifest)
-        2. Resolve roles (from request or player profile)
+        2. Validate roles (required query param — returns 400 if omitted)
         3. Read rank from player profile
         4. Load manifest and filter matches by role (last 20)
         5. If < 5 matches for a role: return static tips (no LLM)
