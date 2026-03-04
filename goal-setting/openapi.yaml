@@ -145,15 +145,6 @@ paths:
             Player's Steam64 ID (string to avoid JavaScript integer precision loss).
             Numeric-only, typically 17 digits.
           example: "76561198432333227"
-        - name: match_id
-          in: query
-          required: false
-          schema:
-            type: string
-          description: |
-            Match ID to generate focus areas for. Must be a numeric Dota match ID (7-13 digits).
-            **Optional** — if omitted, the latest successful match from the player's manifest is used.
-          example: "8577546204"
         - name: roles
           in: query
           required: true
@@ -185,8 +176,6 @@ paths:
               example:
                 success: true
                 steam_id: "76561198432333227"
-                match_id: "8577546204"
-                roles_source: "request"
                 rank: "legend"
                 goals:
                   carry:
@@ -221,7 +210,9 @@ paths:
                     games_analyzed: 8
                     win_rate: 62.5
                     personalized: true
-                gcs_path: "gs://mentoroid-pga-dev/userdata/dota2/goal_setting/76561198432333227/8577546204.json"
+                gcs_paths:
+                  - "gs://mentoroid-pga-dev/userdata/dota2/goal_setting/76561198432333227/carry.json"
+                  - "gs://mentoroid-pga-dev/userdata/dota2/goal_setting/76561198432333227/mid.json"
         '400':
           description: Invalid request
           content:
@@ -309,7 +300,7 @@ paths:
         ```json
         {
           "steam_id": "76561198432333227",
-          "match_id": "8577546204"
+          "role": "carry"
         }
         ```
       operationId: goalSettingPubSub
@@ -381,16 +372,6 @@ components:
           type: string
           description: Player's Steam64 ID
           example: "76561198432333227"
-        match_id:
-          type: string
-          description: Match ID used for generation (from request or auto-resolved from manifest)
-          example: "8577546204"
-        roles_source:
-          type: string
-          enum: ["request"]
-          description: |
-            How roles were resolved. Always `request` — roles are a required query parameter.
-          example: "request"
         rank:
           type: string
           nullable: true
@@ -403,10 +384,14 @@ components:
             Focus areas per role. Keys are canonical role names.
           additionalProperties:
             $ref: '#/components/schemas/RoleGoal'
-        gcs_path:
-          type: string
-          description: GCS path where the result was saved
-          example: "gs://mentoroid-pga-dev/userdata/dota2/goal_setting/76561198432333227/8577546204.json"
+        gcs_paths:
+          type: array
+          description: GCS paths where each role's result was saved (one file per role)
+          items:
+            type: string
+          example:
+            - "gs://mentoroid-pga-dev/userdata/dota2/goal_setting/76561198432333227/carry.json"
+            - "gs://mentoroid-pga-dev/userdata/dota2/goal_setting/76561198432333227/mid.json"
 
     RoleGoal:
       type: object
