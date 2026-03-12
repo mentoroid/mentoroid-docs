@@ -10,50 +10,184 @@ info:
     | GSI Handler | 19151 | Dota 2 Game State Integration |
     | Match Events | 18100 | Flutter implements this server |
 
-    ## What's New in v2.2.0
+    ## What's New
 
-    ### TTS Toggle
-    New endpoints for enabling/disabling TTS globally:
-    - `POST /tts_toggle` - Enable or disable TTS (all speak() calls silently ignored when disabled)
-    - `GET /tts_status` - Get current TTS enabled/disabled state
+    ### v2.3.0 — Sentry Telemetry
+    - **Consent-gated telemetry:** `POST /set_player` accepts optional `firebase_uid` to enable Sentry error tracking and performance checkpoints
+    - **4 phased checkpoints** collecting system info, draft data, in-game coaching stats, and match results
+    - **Error capture** across all modules (pipeline, GSI, TTS, OCR, YOLO, hero selection)
 
-    ### Flutter Match End Payload Updated
-    The `/match_end` webhook session_data fields now match the binary's actual output:
-    - `result` ("Won"/"Lost") replaces `Win` ("Win"/"Lose")
-    - `duration_seconds` replaces `game_time`
-    - `net_worth` replaces `networth`
-    - `last_hits` replaces `lasthit`
-    - `kills`/`deaths`/`assists` replace `kill`/`death`/`assist`
-    - Added new fields: `steam_id`, `is_radiant`, `start_time`, `gold`, `gpm`
+    ### v2.2.0 — TTS Toggle & Payload Cleanup
+    - `POST /tts_toggle` and `GET /tts_status` for enabling/disabling TTS globally
+    - Match end payload field renames: `result`, `duration_seconds`, `net_worth`, `last_hits`, `kills`/`deaths`/`assists`
+    - New fields: `steam_id`, `is_radiant`, `start_time`, `gold`, `gpm`
 
-    ## What's New in v2.1.0
+    ### v2.1.0 — Voice Packs
+    - `POST /voice_set`, `GET /voice_get`, `GET /voice_list`, `POST /voice_sample`
+    - Two voices: `bella` (female), `michael` (male)
 
-    ### Voice Pack System
-    New voice control endpoints for selecting and previewing TTS voice packs:
-    - `POST /voice_set` - Set voice pack (bella = female, michael = male)
-    - `GET /voice_get` - Get current voice and available options
-    - `GET /voice_list` - List all voice packs with metadata
-    - `POST /voice_sample` - Preview voice without changing setting
-
-    ## What's New in v2.0.0
-
-    ### Automated Features
-    The following features are now **fully automated** and no longer require manual API calls:
-    - **Pipeline Start/Stop**: Auto-detection watcher starts pipeline when Dota 2 opens, stops when it closes
-    - **Match Detection**: Automatically detects match start and end via GSI
-    - **Hero Detection**: Automatically identifies the player's hero via GSI
-    - **Role Detection**: Player selects role via in-game keyboard shortcut (1-5)
-
-    ### Deprecated Workflow
-    Previously required manual calls to `/start` and `/stop` - these are now optional and handled automatically.
+    ### v2.0.0 — Full Automation
+    - Auto-detection watcher (Dota opens → start, closes → stop)
+    - `/start` and `/stop` are now optional
 
     ## Flutter Integration Flow
-    1. `GET /ready` - Check backend is running
-    2. `GET /player_info` - Check if Steam ID is configured
-    3. `POST /set_player` - Set Steam ID (one-time setup)
-    4. **Done** - Auto-detection handles everything else
+    1. `GET /ready` — Check backend is running
+    2. `GET /player_info` — Check if Steam ID is configured
+    3. `POST /set_player` — Set Steam ID + optional `firebase_uid` for telemetry
+    4. **Done** — Auto-detection handles everything else
 
     Backend will automatically POST to Flutter's `/match_started` and `/match_end` endpoints.
+
+    ## Telemetry (Sentry)
+
+    ### Consent Model
+    Sentry is **never initialized at startup**. It activates only when `POST /set_player`
+    includes a non-empty `firebase_uid`. Providing a Firebase UID = consent to telemetry.
+    No UID = no Sentry. All telemetry calls are safe no-ops when Sentry is inactive.
+
+    **Identity:** Firebase UID only (opaque, no PII). Steam IDs are scrubbed from all
+    Sentry payloads via regex before transmission.
+
+    ### Checkpoints
+    Four independent Sentry transactions sent at key lifecycle points. Each is immediately
+    flushed to ensure delivery even if the app crashes afterward.
+
+    | # | Name | Trigger |
+    |---|------|---------|
+    | 1 | `checkpoint.startup` | After model loading (deferred if Sentry not yet enabled) |
+    | 2 | `checkpoint.draft` | Once when in-game phase begins |
+    | 3 | `checkpoint.ingame` | Every 10 minutes of game clock |
+    | 4 | `checkpoint.match_end` | After match end data is sent |
+
+    <details>
+    <summary><strong>Checkpoint 1 — Startup</strong> (system info + model load time)</summary>
+
+    Tags:
+    ```
+    os: "windows"
+    os_version: "10"
+    os_arch: "AMD64"
+    python_version: "3.10.11"
+    is_frozen: "true"
+    cpu_name: "AMD64 Family 23 Model 24 Stepping 1, AuthenticAMD"
+    cpu_cores_physical: "4"
+    cpu_cores_logical: "8"
+    ram_total_gb: "13.9"
+    ram_available_gb: "6.9"
+    gpu_count: "2"
+    gpu_0_name: "Radeon RX 5500M"
+    gpu_0_vram_gb: "4.0"
+    gpu_1_name: "AMD Radeon(TM) RX Vega 10 Graphics"
+    gpu_1_vram_gb: "2.0"
+    gpu_vram_total_gb: "6.0"
+    gpu_accel: "CPU_only"
+    onnx_providers: "AzureExecutionProvider,CPUExecutionProvider"
+    primary_resolution: "1920x1080"
+    monitor_count: "2"
+    yolo_provider: "CPUExecutionProvider"
+    ocr_available: "true"
+    ocr_gpu: "true"
+    tts_voice: "bella"
+    ```
+    Measurements:
+    ```
+    model_load_ms: 5028.4
+    ```
+    </details>
+
+    <details>
+    <summary><strong>Checkpoint 2 — Draft</strong> (team composition + hero suggestions)</summary>
+
+    Tags:
+    ```
+    match_id: "8725198582"
+    team: "radiant"
+    detected_role: "Offlane"
+    recommendation_role: "offlane"
+    role_detection_method: "profile_fallback"
+    enemy_team: "Marci,Bane,Sand King,Bristleback"
+    enemy_team_count: "4"
+    hero_suggestions: "Axe,Legion Commander,Mars"
+    hero_suggestion_count: "3"
+    ```
+    </details>
+
+    <details>
+    <summary><strong>Checkpoint 3 — In-Game</strong> (economy + all 20 TTS prompt statuses)</summary>
+
+    Tags:
+    ```
+    match_id: "8725198582"
+    team: "radiant"
+    player_role: "Offlane"
+    game_time_minutes: "10"
+    kills: "0"
+    deaths: "0"
+    assists: "0"
+    prompt_lane_strategy: "skipped"
+    prompt_role_job: "skipped"
+    prompt_bounty_rune: "skipped"
+    prompt_block_enemy_pull: "fired"
+    prompt_prioritize_harass: "fired"
+    prompt_check_pull_camp: "fired"
+    prompt_enemy_harass_spell: "fired"
+    prompt_night_observer: "fired"
+    prompt_power_rune: "fired"
+    prompt_wisdom_shrine: "fired"
+    prompt_lane_pushing: "fired"
+    prompt_lasthit_tracking: "skipped"
+    prompt_lasthit_falling: "skipped"
+    prompt_communicate: "fired"
+    prompt_mid_block_creep: "skipped"
+    prompt_mid_secure_creep: "skipped"
+    prompt_mid_extra_ward: "skipped"
+    prompt_mid_ask_support: "skipped"
+    prompt_offlane_lasthit: "skipped"
+    prompt_offlane_coordinate: "skipped"
+    ```
+    Measurements:
+    ```
+    game_time_seconds: 601.0
+    gold: 875.0
+    gpm: 1378.0
+    xpm: 1101.0
+    ```
+    </details>
+
+    <details>
+    <summary><strong>Checkpoint 4 — Match End</strong> (result + performance + prompt summary)</summary>
+
+    Tags:
+    ```
+    match_id: "8725198582"
+    team: "radiant"
+    hero_id: "35"
+    player_role: "Offlane"
+    result: "Won"
+    match_duration_minutes: "17"
+    role_detection_method: "profile_fallback"
+    hero_suggestions: "Axe,Legion Commander,Mars"
+    prompts_fired: "block_enemy_pull,prioritize_harass,check_pull_camp,enemy_harass_spell,night_observer,power_rune,wisdom_shrine,lane_pushing,communicate"
+    prompts_fired_count: "9"
+    prompts_skipped: "lane_strategy,role_job,bounty_rune,lasthit_tracking,lasthit_falling,mid_block_creep,mid_secure_creep,mid_extra_ward,mid_ask_support,offlane_lasthit,offlane_coordinate"
+    prompts_skipped_count: "11"
+    ```
+    Measurements:
+    ```
+    duration_seconds: 1031.0
+    kills: 0.0
+    deaths: 0.0
+    assists: 0.0
+    last_hits: 136.0
+    gpm: 1588.0
+    xpm: 894.0
+    ```
+    </details>
+
+    ### Error Collection
+    - All exceptions captured via `capture_exception_safe()` (never crashes the app)
+    - Breadcrumbs track state transitions, API calls, model inference, TTS prompts
+    - Performance spans measure YOLO inference, OCR detection, TTS generation, hero recommendation compute time
 
     ## Auto-Detection Watcher
     The watcher monitors for the Dota 2 process:
@@ -143,6 +277,9 @@ paths:
         Configure the Steam ID for the player. This is a **one-time setup** required before coaching can begin.
         The backend uses this to identify the player in GSI data and fetch player statistics.
 
+        **Telemetry consent:** Pass `firebase_uid` to enable Sentry error tracking and performance
+        telemetry. Omitting it or sending an empty string keeps telemetry disabled.
+
         **To replace an existing Steam ID:**
         - Pass `force: true` in the request body
         - Without force, returns error if Steam ID already set
@@ -154,7 +291,13 @@ paths:
               $ref: '#/components/schemas/SetPlayerRequest'
             examples:
               basic:
-                summary: First time setup
+                summary: First time setup (with telemetry consent)
+                value:
+                  steam_id: "76561197960272226"
+                  api_key: "mentoroid_api_key_here"
+                  firebase_uid: "ecJyqObrhNPDTJ6JfcOnVhTflui2"
+              without_telemetry:
+                summary: Setup without telemetry
                 value:
                   steam_id: "76561197960272226"
                   api_key: "mentoroid_api_key_here"
@@ -163,6 +306,7 @@ paths:
                 value:
                   steam_id: "76561197960272226"
                   api_key: "mentoroid_api_key_here"
+                  firebase_uid: "ecJyqObrhNPDTJ6JfcOnVhTflui2"
                   force: true
       responses:
         "200":
@@ -797,6 +941,13 @@ components:
           type: string
           description: Mentoroid API key (required for authentication)
           example: "mentoroid_api_key_here"
+        firebase_uid:
+          type: string
+          default: ""
+          description: |
+            Firebase Auth UID. When non-empty, enables Sentry telemetry (error tracking
+            and performance checkpoints). Omit or send empty string to opt out.
+          example: "ecJyqObrhNPDTJ6JfcOnVhTflui2"
         force:
           type: boolean
           default: false
