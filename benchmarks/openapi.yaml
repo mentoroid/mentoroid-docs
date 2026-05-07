@@ -1,72 +1,100 @@
 openapi: 3.0.3
 info:
-  title: Benchmark Data Access
+  title: Mentoroid Benchmark API
   description: |
     ## Overview
 
-    Benchmark data is hosted on a public Google Cloud Storage (GCS) bucket.
-    Frontend can directly fetch this data without authentication.
+    Frontend fetches hero/rank/role benchmark stats from the Stats API. The
+    backend reads the underlying GCS file (which is now nested into duration
+    buckets), picks the right bucket for the match's `duration_seconds`, and
+    returns a flat JSON — same shape as the old format.
 
-    Whenever benchmark data needs to be displayed on any screen (e.g., Session End Screen,
-    PGA Screen), you can build the URL using the parameters below and fetch the data
-    directly from the GCS bucket. **No API call required.**
+    ## What changed
 
-    ---
+    Previously the frontend hit a public GCS URL directly:
 
-    ## How to Access Benchmark Data
-
-    ### Base URL Format
     ```
     https://storage.googleapis.com/mentoroid-public-data/benchmarks/hero_specific/current_week/{HERO_ID}/{RANK}/{ROLE}.json
     ```
 
-    ### Example URL
+    The benchmark file on GCS got reformatted into nested duration buckets
+    (`by_duration: {15_20: {...}, 20_25: {...}, ...}`). To avoid making
+    frontend do bucket math, the backend slices it.
+
+    ## After (what you do now)
+
     ```
-    https://storage.googleapis.com/mentoroid-public-data/benchmarks/hero_specific/current_week/1/ancient/carry.json
+    GET https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev/v1/benchmark/{HERO_ID}/{RANK}/{ROLE}?duration_seconds={N}
     ```
 
-    ---
+    ## What you need to pass
 
-    ## Available Roles
+    | Thing | Where it goes | Required | Source |
+    |---|---|---|---|
+    | `hero_id` | URL path | yes | `match_end` webhook → `session_data.hero_id` |
+    | `rank` | URL path | yes | `match_end` webhook → `session_data.rank` *(may need to be added by binary)* |
+    | `role` | URL path (lowercase) | yes | `match_end` webhook → `session_data.role` (lowercase it) |
+    | `duration_seconds` | query param | yes | `match_end` webhook → `session_data.duration_seconds` |
+    | `X-API-Key` | request header | yes | same key you already use for other Stats API calls |
 
-    | Role         | File Name         |
-    |--------------|-------------------|
-    | Carry        | carry.json        |
-    | Mid          | mid.json          |
-    | Offlane      | offlane.json      |
-    | Hard Support | hard_support.json |
-    | Soft Support | soft_support.json |
+    ## Allowed values
 
-    ---
+    - **rank:** `herald`, `guardian`, `crusader`, `archon`, `legend`, `ancient`, `divine`
+    - **role:** `carry`, `mid`, `offlane`, `soft_support`, `hard_support`
+    - **immortal players:** pass `divine` (the API folds them together)
 
-    ## Available Ranks
+    ## Summary of the change
 
-    | Rank      |
-    |-----------|
-    | herald    |
-    | guardian  |
-    | crusader  |
-    | archon    |
-    | legend    |
-    | ancient   |
-    | divine    |
+    |  | Before | After |
+    |---|---|---|
+    | URL host | `storage.googleapis.com` | `asia-southeast1-mentoroid-app-dev.cloudfunctions.net` |
+    | Auth | none | `X-API-Key` header (same key as other API calls) |
+    | Query params | none | `?duration_seconds=N` |
+    | Response | flat (old) / nested (new) | flat — always same 20 fields |
+    | Bucket math | would have been needed | done by backend |
 
-  version: 1.0.0
+    **Three things change in your fetch call. Render code stays the same.**
+
+    ## Production URL (when prod is ready)
+
+    ```
+    https://asia-southeast1-mentoroid-app.cloudfunctions.net/stats-api/v1/benchmark/{hero_id}/{rank}/{role}?duration_seconds={n}
+    ```
+
+    Same shape as the dev URL — just different host. Swap when you're ready to ship.
+
+  version: 2.0.0
   contact:
     email: support@mentoroid.ai
 
 servers:
-  - url: https://storage.googleapis.com/mentoroid-public-data
-    description: GCS Public Bucket
+  - url: https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev
+    description: Stats API (Dev)
+  - url: https://asia-southeast1-mentoroid-app.cloudfunctions.net/stats-api
+    description: Stats API (Prod)
+
+security:
+  - ApiKeyAuth: []
 
 paths:
-  /benchmarks/hero_specific/current_week/{hero_id}/{rank}/{role}.json:
+  /v1/benchmark/{hero_id}/{rank}/{role}:
     get:
-      summary: Get Hero Benchmark Data
+      summary: Get hero benchmark for a match duration
       description: |
-        Fetch benchmark data for a specific hero, rank, and role combination.
+        Returns a flat 20-field benchmark for the given hero/rank/role,
+        sliced to the duration bucket that contains `duration_seconds`.
 
-        This is a direct GCS fetch - no authentication required.
+        ## Concrete example
+
+        For a match with hero 49 (Tiny), Divine rank, Offlane role, lasted 1312 seconds:
+
+        ```
+        GET https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev/v1/benchmark/49/divine/offlane?duration_seconds=1312
+        X-API-Key: mk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+        ```
+
+        Response is flat JSON with the same shape as the old format —
+        render directly, no nesting to unpack.
       operationId: getHeroBenchmark
       tags:
         - Benchmarks
@@ -74,14 +102,16 @@ paths:
         - name: hero_id
           in: path
           required: true
-          description: Hero ID (e.g., 1, 2, 3...)
+          description: Dota 2 hero ID (e.g., 1, 2, 3...)
           schema:
             type: integer
-            example: 1
+            example: 49
         - name: rank
           in: path
           required: true
-          description: Player rank
+          description: |
+            Player rank. Immortal players should pass `divine` — the API
+            folds them together.
           schema:
             type: string
             enum:
@@ -92,27 +122,182 @@ paths:
               - legend
               - ancient
               - divine
-            example: ancient
+            example: divine
         - name: role
           in: path
           required: true
-          description: Player role
+          description: Player role (lowercase)
           schema:
             type: string
             enum:
               - carry
               - mid
               - offlane
-              - hard_support
               - soft_support
-            example: carry
+              - hard_support
+            example: offlane
+        - name: duration_seconds
+          in: query
+          required: true
+          description: |
+            Match duration in seconds. The backend picks the duration bucket
+            that contains this value (e.g., 1312 → `20_25` bucket).
+          schema:
+            type: integer
+            minimum: 1
+            example: 1312
       responses:
         '200':
-          description: Benchmark data retrieved successfully
+          description: Benchmark retrieved successfully
           content:
             application/json:
               schema:
-                type: object
-                description: Hero-specific benchmark statistics
+                $ref: '#/components/schemas/Benchmark'
+              example:
+                total_games: 80
+                win_rate: 45
+                net_worth: 15829
+                xp_per_min: 1348.5
+                gold_per_min: 752.5
+                last_hits: 113.5
+                denies: 4
+                kills: 4
+                deaths: 5
+                assists: 7
+                kill_participation: 16.47
+                death_participation: 17.57
+                obs_placed: 0
+                sen_placed: 0
+                hero_damage: 11379
+                tower_damage: 1137.5
+                hero_healing: 0
+                camps_stacked: 0
+                stuns: 27.28
+                kda: 2
+        '400':
+          description: |
+            Bad input — wrong rank/role, missing `duration_seconds`, or invalid hero_id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid `X-API-Key` header.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
-          description: Benchmark data not found for the specified combination
+          description: No benchmark exists for this hero/rank/role combo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate-limited. Over 100 req/min on this API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Backend issue. Retry in 30s.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Same API key used for other Stats API calls.
+        Format: `mk_<32 hex chars>`.
+
+  schemas:
+    Benchmark:
+      type: object
+      description: |
+        Flat 20-field benchmark for a single hero/rank/role/duration bucket.
+        Same shape as the legacy GCS format — render directly.
+      properties:
+        total_games:
+          type: integer
+          description: Number of games used to compute this benchmark
+          example: 80
+        win_rate:
+          type: number
+          description: Win rate percentage (0–100)
+          example: 45
+        net_worth:
+          type: number
+          example: 15829
+        xp_per_min:
+          type: number
+          example: 1348.5
+        gold_per_min:
+          type: number
+          example: 752.5
+        last_hits:
+          type: number
+          example: 113.5
+        denies:
+          type: number
+          example: 4
+        kills:
+          type: number
+          example: 4
+        deaths:
+          type: number
+          example: 5
+        assists:
+          type: number
+          example: 7
+        kill_participation:
+          type: number
+          description: Percentage of team kills the player was involved in
+          example: 16.47
+        death_participation:
+          type: number
+          description: Percentage of team deaths the player was involved in
+          example: 17.57
+        obs_placed:
+          type: number
+          description: Observer wards placed
+          example: 0
+        sen_placed:
+          type: number
+          description: Sentry wards placed
+          example: 0
+        hero_damage:
+          type: number
+          example: 11379
+        tower_damage:
+          type: number
+          example: 1137.5
+        hero_healing:
+          type: number
+          example: 0
+        camps_stacked:
+          type: number
+          example: 0
+        stuns:
+          type: number
+          description: Total stun seconds applied to enemies
+          example: 27.28
+        kda:
+          type: number
+          description: (kills + assists) / max(deaths, 1)
+          example: 2
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error type
+        message:
+          type: string
+          description: Human-readable error message
