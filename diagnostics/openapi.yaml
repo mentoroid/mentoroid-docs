@@ -179,7 +179,29 @@ paths:
         (vanishingly rare) returns 503 — the client should retry to obtain a fresh `ticket_id`.
         A 30-day GCS lifecycle rule deletes bundles automatically.
 
-        **curl example — full bundle:**
+        **curl example — minimal Flutter case (timestamp + log files, nothing else):**
+        This is what most Flutter "Report Issue" buttons will send. No category, no
+        description, no match_id — none of those are required, and the auto-error-scanner
+        on the server side surfaces the actual error from the logs in the Discord embed.
+        ```bash
+        curl -X POST https://dev.mentoroid.ai/diagnostics/upload \
+          -H "X-API-Key: mk_your_api_key_here" \
+          -F 'metadata={"client_timestamp":"2026-05-07T12:00:00Z"}' \
+          -F "mentoroid_backend_log=@mentoroid_backend.log.gz" \
+          -F "main_log=@main.log.gz" \
+          -F "gsi_all_data=@gsi_all_data.jsonl.gz"
+        ```
+
+        **curl example — bare minimum (timestamp only, no files):**
+        Useful when a user wants to report an issue but no logs were generated (e.g. the
+        binary never started). Returns 200 with `files_received: []`.
+        ```bash
+        curl -X POST https://dev.mentoroid.ai/diagnostics/upload \
+          -H "X-API-Key: mk_your_api_key_here" \
+          -F 'metadata={"client_timestamp":"2026-05-07T12:00:00Z"}'
+        ```
+
+        **curl example — full bundle (only when the client has every field):**
         ```bash
         curl -X POST https://dev.mentoroid.ai/diagnostics/upload \
           -H "X-API-Key: mk_your_api_key_here" \
@@ -187,13 +209,6 @@ paths:
           -F "mentoroid_backend_log=@mentoroid_backend.log.gz" \
           -F "main_log=@main.log.gz" \
           -F "gsi_all_data=@gsi_all_data.jsonl.gz"
-        ```
-
-        **curl example — metadata only (no log files):**
-        ```bash
-        curl -X POST https://dev.mentoroid.ai/diagnostics/upload \
-          -H "X-API-Key: mk_your_api_key_here" \
-          -F 'metadata={"client_timestamp":"2026-05-07T12:00:00Z","error_category":"other","user_description":"App crashed on startup"}'
         ```
       operationId: uploadDiagnostics
       security:
@@ -266,11 +281,31 @@ paths:
                       List of field names whose files were successfully received and written to GCS.
                       Empty array if only metadata was uploaded.
                     example: ["main_log", "gsi_all_data"]
-              example:
-                success: true
-                ticket_id: "diag_a3f8c1b2d4e5"
-                received_at: "2026-05-07T12:00:01Z"
-                files_received: ["mentoroid_backend_log", "main_log", "gsi_all_data"]
+              examples:
+                minimal_flutter:
+                  summary: Minimal Flutter case (timestamp + log files)
+                  description: What most "Report Issue" button presses produce.
+                  value:
+                    success: true
+                    ticket_id: "diag_b27b027dc8fe"
+                    received_at: "2026-05-07T15:15:32.239102Z"
+                    files_received: ["mentoroid_backend_log", "main_log", "gsi_all_data"]
+                metadata_only:
+                  summary: Metadata only (no log files)
+                  description: Returned when the user reports an issue but no logs were generated.
+                  value:
+                    success: true
+                    ticket_id: "diag_8f6a61df3689"
+                    received_at: "2026-05-07T15:15:32.965107Z"
+                    files_received: []
+                full_bundle:
+                  summary: Full bundle with rich metadata
+                  description: Returned when the client supplies every optional field.
+                  value:
+                    success: true
+                    ticket_id: "diag_a3f8c1b2d4e5"
+                    received_at: "2026-05-07T12:00:01Z"
+                    files_received: ["mentoroid_backend_log", "main_log", "gsi_all_data"]
         '400':
           description: |
             Validation error. Possible causes:
