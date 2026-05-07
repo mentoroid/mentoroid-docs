@@ -207,6 +207,18 @@
         <a href="./session-summary/">View Session Summary API →</a>
       </div>
 
+      <div class="card">
+        <h2><span class="icon">🐛</span> Diagnostic Logs API</h2>
+        <p>Receive support bundles from the dota2-ingame Flutter client. Multipart upload of gzipped logs + metadata; Discord notification on receipt.</p>
+        <ul class="features">
+          <li>POST /diagnostics/upload — multipart bundle</li>
+          <li>Up to 3 gzipped log files + JSON metadata</li>
+          <li>Server-generated ticket_id, atomic GCS writes</li>
+          <li>Optional Discord webhook integration</li>
+        </ul>
+        <a href="./api/#tag/Diagnostic-Uploads">View Diagnostic API →</a>
+      </div>
+
     </div>
 
     <footer>
