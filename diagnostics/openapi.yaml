@@ -4,6 +4,55 @@ info:
   description: |
     User-triggered support bundle uploads from the dota2-ingame Flutter client.
 
+    ## Minimal Flutter integration
+
+    Only two things are required from the client: a `metadata` form field, and a `client_timestamp` inside it. Everything else is optional.
+
+    ```dart
+    // Build multipart request
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('https://dev.mentoroid.ai/diagnostics/upload'),
+    )
+      ..headers['X-API-Key'] = apiKey
+      ..fields['metadata'] = jsonEncode({
+        'client_timestamp': DateTime.now().toUtc().toIso8601String(),
+      });
+
+    // Attach whichever log files exist (gzip on the fly)
+    for (final entry in {
+      'mentoroid_backend_log': 'mentoroid_backend.log',
+      'main_log': 'main.log',
+      'gsi_all_data': 'gsi_all_data.jsonl',
+    }.entries) {
+      final file = File('${logsDir.path}/${entry.value}');
+      if (file.existsSync()) {
+        final gzipped = gzip.encode(await file.readAsBytes());
+        request.files.add(http.MultipartFile.fromBytes(
+          entry.key,
+          gzipped,
+          filename: '${entry.value}.gz',
+        ));
+      }
+    }
+
+    final response = await request.send();
+    // 200 = success, body has ticket_id
+    ```
+
+    That's the entire integration. The backend's automatic error-scanner reads `main.log.gz` and `mentoroid_backend.log.gz` server-side and surfaces the first error line per file in the Discord notification — so dev triage gets meaningful signal even when the user-supplied metadata is empty.
+
+    ### Optional triage hints (Flutter can include if available)
+
+    - `app_version` — from `package_info_plus` (`(await PackageInfo.fromPlatform()).version`)
+    - `os` — `Platform.operatingSystem`
+    - `binary_version` — if Flutter knows it (typically not exposed)
+    - `match_id` — if Flutter knows the active Dota 2 match (typically not exposed)
+    - `error_category` — only if you add a UI dropdown
+    - `user_description` — only if you add a UI text field
+
+    When omitted, the Discord embed shows `unknown` placeholders for these fields and gracefully omits the Match ID field entirely. Triage still works via auto-scanned error snippets from the logs.
+
     ## Overview
 
     When a user encounters an issue in the dota2-ingame binary or Flutter app,
@@ -325,6 +374,10 @@ components:
         Client-supplied metadata included with a `POST /diagnostics/upload` request.
         Only the documented fields are persisted to GCS and forwarded to Pub/Sub — any
         unknown keys are silently dropped by the server (allowlist enforcement).
+
+        Only `client_timestamp` is required. All other fields are optional triage hints —
+        the backend gracefully handles missing values and the Discord notification falls back
+        to log-scanned error snippets for triage signal.
       required:
         - client_timestamp
       properties:
@@ -337,6 +390,10 @@ components:
             but does not parse for full correctness. The server's own `received_at` is the
             authoritative time for support triage.
           example: "2026-05-07T12:00:00Z"
+        os:
+          type: string
+          description: Operating system reported by the client.
+          example: "windows"
         app_version:
           type: string
           description: Flutter app version string.
@@ -345,10 +402,6 @@ components:
           type: string
           description: dota2-ingame native binary version string.
           example: "2.0.1"
-        os:
-          type: string
-          description: Operating system reported by the client.
-          example: "windows"
         match_id:
           oneOf:
             - type: string
