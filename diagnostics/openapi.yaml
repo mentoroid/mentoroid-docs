@@ -53,58 +53,23 @@ info:
 
     When omitted, the Discord embed shows `unknown` placeholders for these fields and gracefully omits the Match ID field entirely. Triage still works via auto-scanned error snippets from the logs.
 
-    ## Overview
+    ---
 
-    When a user encounters an issue in the dota2-ingame binary or Flutter app,
-    the client collects gzipped log files and optional metadata, then POSTs them
-    as a `multipart/form-data` request to `POST /diagnostics/upload`.
+    ## What happens server-side
 
-    ## What Gets Uploaded
+    The server generates a unique `ticket_id` (`diag_<12 hex chars>`), writes every blob atomically
+    to GCS under `support-logs/{steam_id}/{ticket_id}/`, and publishes a Pub/Sub message so a
+    Discord webhook (when configured) can alert the dev team. See the endpoint below for full
+    request/response details including size limits, file format requirements, and GCS layout.
 
-    Up to 3 optional gzip-compressed log files plus a required JSON metadata field:
-
-    | Field | Type | Description |
-    |-------|------|-------------|
-    | `metadata` | JSON string | Required. Client timestamp, app version, error category, optional user note |
-    | `mentoroid_backend_log` | binary (gz) | Backend service log from the Flutter client |
-    | `main_log` | binary (gz) | Main process log from the dota2-ingame binary |
-    | `gsi_all_data` | binary (gz) | GSI event stream captured during the session |
-
-    ## Server-Side Behaviour
-
-    The server generates a unique `ticket_id` (`diag_<12 hex chars>`), writes
-    every blob atomically to GCS under `support-logs/{steam_id}/{ticket_id}/`
-    using `if_generation_match=0` (create-only), and publishes a Pub/Sub message
-    so a Discord webhook (when configured) can alert the dev team.
-
-    A 30-day GCS lifecycle rule deletes bundles automatically — no manual cleanup
-    required.
-
-    **GCS layout after a successful upload:**
-    ```
-    gs://mentoroid-pga-dev/support-logs/{steam_id}/{ticket_id}/
-    ├── metadata.json
-    ├── mentoroid_backend.log.gz
-    ├── main.log.gz
-    └── gsi_all_data.jsonl.gz
-    ```
-
-    ## Size Limits
-
-    | Scope | Limit |
-    |-------|-------|
-    | Total request body | 32 MB (enforced by Cloud Run) |
-    | Per log file | 11 MB |
-    | `metadata` JSON field | 64 KB |
-
-    ## Rate Limit
-
-    5 requests per hour per API key.
+    ---
 
     ## Authentication
 
-    `X-API-Key` header — same key used for all other Orchestrator endpoints.
-    Obtained via Steam login on the Mentoroid app.
+    `X-API-Key` header — same key used for all other Orchestrator endpoints, obtained via Steam
+    login on the Mentoroid app. Rate-limited to 5 requests per hour per API key.
+
+    ---
 
     ## Base URLs
 
@@ -143,30 +108,32 @@ paths:
         - Diagnostic Uploads
       summary: Upload a diagnostic log bundle
       description: |
-        Receive a support bundle from the dota2-ingame Flutter client. The client collects
-        gzipped log files and optional metadata, then POSTs them as a `multipart/form-data`
-        request. The server generates a unique `ticket_id`, persists every blob to GCS under
-        `support-logs/{steam_id}/{ticket_id}/`, and publishes a notification to Pub/Sub so
-        a Discord webhook (when configured) can alert the dev team.
+        Accept a `multipart/form-data` support bundle, persist every blob atomically to GCS,
+        and publish a Pub/Sub notification so a Discord webhook (when configured) alerts the
+        dev team. Returns a server-generated `ticket_id` on success.
 
-        **Authentication:** `X-API-Key` header (same key used for all other Orchestrator endpoints).
+        ### Size limits
 
-        **Rate Limit:** 5 requests per hour per API key.
+        | Scope | Limit |
+        |-------|-------|
+        | Total request body | 32 MB (enforced by Cloud Run) |
+        | Per log file | 11 MB |
+        | `metadata` JSON field | 64 KB |
 
-        **Size limits:**
-        - Total request body: 32 MB (enforced by Cloud Run)
-        - Per log file: 11 MB
-        - `metadata` JSON field: 64 KB
+        ### File format
 
-        **File format:** All log files must be gzip-compressed. The server validates the
-        `\x1f\x8b` magic bytes — plaintext or wrong-format uploads are rejected with 400.
+        All log files must be gzip-compressed. The server validates the `\x1f\x8b` magic bytes
+        — plaintext or wrong-format uploads are rejected with 400.
 
-        **Metadata allowlist:** Only the documented keys (`client_timestamp`, `app_version`,
-        `binary_version`, `os`, `match_id`, `error_category`, `user_description`) are
-        persisted. Unknown keys are silently dropped before storage. `match_id` may be sent
-        as an integer and will be coerced to a string by the server.
+        ### Metadata allowlist
 
-        **GCS layout after a successful upload:**
+        Only the documented keys (`client_timestamp`, `app_version`, `binary_version`, `os`,
+        `match_id`, `error_category`, `user_description`) are persisted. Unknown keys are
+        silently dropped before storage. `match_id` may be sent as an integer and will be
+        coerced to a string by the server.
+
+        ### GCS layout
+
         ```
         gs://mentoroid-pga-dev/support-logs/{steam_id}/{ticket_id}/
         ├── metadata.json
@@ -179,10 +146,11 @@ paths:
         (vanishingly rare) returns 503 — the client should retry to obtain a fresh `ticket_id`.
         A 30-day GCS lifecycle rule deletes bundles automatically.
 
-        **curl example — minimal Flutter case (timestamp + log files, nothing else):**
-        This is what most Flutter "Report Issue" buttons will send. No category, no
-        description, no match_id — none of those are required, and the auto-error-scanner
-        on the server side surfaces the actual error from the logs in the Discord embed.
+        ### Examples
+
+        **Minimal Flutter case** — timestamp + log files, nothing else. This is what most
+        "Report Issue" button presses will send. The auto-error-scanner surfaces the actual
+        error from the logs in the Discord embed even with no extra metadata.
         ```bash
         curl -X POST https://dev.mentoroid.ai/diagnostics/upload \
           -H "X-API-Key: mk_your_api_key_here" \
@@ -192,16 +160,16 @@ paths:
           -F "gsi_all_data=@gsi_all_data.jsonl.gz"
         ```
 
-        **curl example — bare minimum (timestamp only, no files):**
-        Useful when a user wants to report an issue but no logs were generated (e.g. the
-        binary never started). Returns 200 with `files_received: []`.
+        **Bare minimum** — timestamp only, no files. Useful when the user reports an issue
+        but no logs were generated (e.g. the binary never started). Returns 200 with
+        `files_received: []`.
         ```bash
         curl -X POST https://dev.mentoroid.ai/diagnostics/upload \
           -H "X-API-Key: mk_your_api_key_here" \
           -F 'metadata={"client_timestamp":"2026-05-07T12:00:00Z"}'
         ```
 
-        **curl example — full bundle (only when the client has every field):**
+        **Full bundle** — only when the client has every optional field available.
         ```bash
         curl -X POST https://dev.mentoroid.ai/diagnostics/upload \
           -H "X-API-Key: mk_your_api_key_here" \
