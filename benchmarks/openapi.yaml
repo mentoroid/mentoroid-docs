@@ -5,23 +5,10 @@ info:
     ## Overview
 
     Frontend fetches hero/rank/role benchmark stats from the Stats API. The
-    backend reads the underlying GCS file (which is now nested into duration
-    buckets), picks the right bucket for the match's `duration_seconds`, and
-    returns a flat JSON — same shape as the old format.
+    backend picks the right duration bucket for the match's
+    `duration_seconds` and returns a flat 20-field JSON.
 
-    ## What changed
-
-    Previously the frontend hit a public GCS URL directly:
-
-    ```
-    https://storage.googleapis.com/mentoroid-public-data/benchmarks/hero_specific/current_week/{HERO_ID}/{RANK}/{ROLE}.json
-    ```
-
-    The benchmark file on GCS got reformatted into nested duration buckets
-    (`by_duration: {15_20: {...}, 20_25: {...}, ...}`). To avoid making
-    frontend do bucket math, the backend slices it.
-
-    ## After (what you do now)
+    ## Endpoint
 
     ```
     GET https://asia-southeast1-mentoroid-app-dev.cloudfunctions.net/stats-api-dev/v1/benchmark/{HERO_ID}/{RANK}/{ROLE}?duration_seconds={N}
@@ -32,28 +19,20 @@ info:
     | Thing | Where it goes | Required | Source |
     |---|---|---|---|
     | `hero_id` | URL path | yes | `match_end` webhook → `session_data.hero_id` |
-    | `rank` | URL path | yes | `match_end` webhook → `session_data.rank` *(may need to be added by binary)* |
+    | `rank` | URL path | yes | — |
     | `role` | URL path (lowercase) | yes | `match_end` webhook → `session_data.role` (lowercase it) |
     | `duration_seconds` | query param | yes | `match_end` webhook → `session_data.duration_seconds` |
     | `X-API-Key` | request header | yes | same key you already use for other Stats API calls |
 
     ## Allowed values
 
-    - **rank:** `herald`, `guardian`, `crusader`, `archon`, `legend`, `ancient`, `divine`
+    - **rank:** `herald`, `guardian`, `crusader`, `archon`, `legend`, `ancient`, `divine`, `immortal`
     - **role:** `carry`, `mid`, `offlane`, `soft_support`, `hard_support`
-    - **immortal players:** pass `divine` (the API folds them together)
-
-    ## Summary of the change
-
-    |  | Before | After |
-    |---|---|---|
-    | URL host | `storage.googleapis.com` | `asia-southeast1-mentoroid-app-dev.cloudfunctions.net` |
-    | Auth | none | `X-API-Key` header (same key as other API calls) |
-    | Query params | none | `?duration_seconds=N` |
-    | Response | flat (old) / nested (new) | flat — always same 20 fields |
-    | Bucket math | would have been needed | done by backend |
-
-    **Three things change in your fetch call. Render code stays the same.**
+    - **immortal players:** send `immortal` directly. The API transparently aliases
+      it to `divine` server-side (the dataset has no separate immortal bucket) and
+      returns the divine bucket data with a `200`. Sending `divine` still works and
+      returns the same payload. Case-insensitive — `Immortal`, `IMMORTAL`, and
+      `immortal` all map.
 
     ## Production URL (when prod is ready)
 
@@ -110,8 +89,10 @@ paths:
           in: path
           required: true
           description: |
-            Player rank. Immortal players should pass `divine` — the API
-            folds them together.
+            Player rank. `immortal` is accepted and transparently aliased to
+            `divine` server-side (the benchmark dataset has no separate
+            immortal bucket), so both return the same payload.
+            Case-insensitive.
           schema:
             type: string
             enum:
@@ -122,6 +103,7 @@ paths:
               - legend
               - ancient
               - divine
+              - immortal
             example: divine
         - name: role
           in: path
