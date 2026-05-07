@@ -1,0 +1,385 @@
+openapi: 3.0.3
+info:
+  title: Diagnostic Uploads API
+  description: |
+    User-triggered support bundle uploads from the dota2-ingame Flutter client.
+
+    ## Overview
+
+    When a user encounters an issue in the dota2-ingame binary or Flutter app,
+    the client collects gzipped log files and optional metadata, then POSTs them
+    as a `multipart/form-data` request to `POST /diagnostics/upload`.
+
+    ## What Gets Uploaded
+
+    Up to 3 optional gzip-compressed log files plus a required JSON metadata field:
+
+    | Field | Type | Description |
+    |-------|------|-------------|
+    | `metadata` | JSON string | Required. Client timestamp, app version, error category, optional user note |
+    | `mentoroid_backend_log` | binary (gz) | Backend service log from the Flutter client |
+    | `main_log` | binary (gz) | Main process log from the dota2-ingame binary |
+    | `gsi_all_data` | binary (gz) | GSI event stream captured during the session |
+
+    ## Server-Side Behaviour
+
+    The server generates a unique `ticket_id` (`diag_<12 hex chars>`), writes
+    every blob atomically to GCS under `support-logs/{steam_id}/{ticket_id}/`
+    using `if_generation_match=0` (create-only), and publishes a Pub/Sub message
+    so a Discord webhook (when configured) can alert the dev team.
+
+    A 30-day GCS lifecycle rule deletes bundles automatically — no manual cleanup
+    required.
+
+    **GCS layout after a successful upload:**
+    ```
+    gs://mentoroid-pga-dev/support-logs/{steam_id}/{ticket_id}/
+    ├── metadata.json
+    ├── mentoroid_backend.log.gz
+    ├── main.log.gz
+    └── gsi_all_data.jsonl.gz
+    ```
+
+    ## Size Limits
+
+    | Scope | Limit |
+    |-------|-------|
+    | Total request body | 32 MB (enforced by Cloud Run) |
+    | Per log file | 11 MB |
+    | `metadata` JSON field | 64 KB |
+
+    ## Rate Limit
+
+    5 requests per hour per API key.
+
+    ## Authentication
+
+    `X-API-Key` header — same key used for all other Orchestrator endpoints.
+    Obtained via Steam login on the Mentoroid app.
+
+    ## Base URLs
+
+    | Environment | Base URL |
+    |-------------|----------|
+    | Dev | `https://dev.mentoroid.ai` |
+    | Prod | `https://api.mentoroid.ai` |
+
+  version: 1.0.0
+  contact:
+    name: Mentoroid Team
+    email: dev@mentoroid.ai
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://dev.mentoroid.ai
+    description: Orchestrator (Dev)
+  - url: https://api.mentoroid.ai
+    description: Orchestrator (Prod)
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Diagnostic Uploads
+    description: |
+      User-triggered support bundles uploaded from the dota2-ingame Flutter client.
+      Files land in GCS under `support-logs/{steam_id}/{ticket_id}/` and trigger
+      a Discord notification (when configured). 30-day GCS lifecycle for automatic cleanup.
+
+paths:
+  /diagnostics/upload:
+    post:
+      tags:
+        - Diagnostic Uploads
+      summary: Upload a diagnostic log bundle
+      description: |
+        Receive a support bundle from the dota2-ingame Flutter client. The client collects
+        gzipped log files and optional metadata, then POSTs them as a `multipart/form-data`
+        request. The server generates a unique `ticket_id`, persists every blob to GCS under
+        `support-logs/{steam_id}/{ticket_id}/`, and publishes a notification to Pub/Sub so
+        a Discord webhook (when configured) can alert the dev team.
+
+        **Authentication:** `X-API-Key` header (same key used for all other Orchestrator endpoints).
+
+        **Rate Limit:** 5 requests per hour per API key.
+
+        **Size limits:**
+        - Total request body: 32 MB (enforced by Cloud Run)
+        - Per log file: 11 MB
+        - `metadata` JSON field: 64 KB
+
+        **File format:** All log files must be gzip-compressed. The server validates the
+        `\x1f\x8b` magic bytes — plaintext or wrong-format uploads are rejected with 400.
+
+        **Metadata allowlist:** Only the documented keys (`client_timestamp`, `app_version`,
+        `binary_version`, `os`, `match_id`, `error_category`, `user_description`) are
+        persisted. Unknown keys are silently dropped before storage. `match_id` may be sent
+        as an integer and will be coerced to a string by the server.
+
+        **GCS layout after a successful upload:**
+        ```
+        gs://mentoroid-pga-dev/support-logs/{steam_id}/{ticket_id}/
+        ├── metadata.json
+        ├── mentoroid_backend.log.gz
+        ├── main.log.gz
+        └── gsi_all_data.jsonl.gz
+        ```
+
+        All GCS writes use `if_generation_match=0` (atomic create-only). A uuid4 collision
+        (vanishingly rare) returns 503 — the client should retry to obtain a fresh `ticket_id`.
+        A 30-day GCS lifecycle rule deletes bundles automatically.
+
+        **curl example — full bundle:**
+        ```bash
+        curl -X POST https://dev.mentoroid.ai/diagnostics/upload \
+          -H "X-API-Key: mk_your_api_key_here" \
+          -F 'metadata={"client_timestamp":"2026-05-07T12:00:00Z","app_version":"1.4.2","binary_version":"2.0.1","os":"windows","match_id":8565356977,"error_category":"pipeline","user_description":"TTS stopped after 10 min"}' \
+          -F "mentoroid_backend_log=@mentoroid_backend.log.gz" \
+          -F "main_log=@main.log.gz" \
+          -F "gsi_all_data=@gsi_all_data.jsonl.gz"
+        ```
+
+        **curl example — metadata only (no log files):**
+        ```bash
+        curl -X POST https://dev.mentoroid.ai/diagnostics/upload \
+          -H "X-API-Key: mk_your_api_key_here" \
+          -F 'metadata={"client_timestamp":"2026-05-07T12:00:00Z","error_category":"other","user_description":"App crashed on startup"}'
+        ```
+      operationId: uploadDiagnostics
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - metadata
+              properties:
+                metadata:
+                  type: string
+                  description: |
+                    JSON-encoded `DiagnosticsMetadata` object. Must be valid JSON, must be a
+                    JSON object (not an array or scalar), and must include `client_timestamp`.
+                    Serialized size must not exceed 64 KB.
+                  example: '{"client_timestamp":"2026-05-07T12:00:00Z","app_version":"1.4.2","error_category":"pipeline","user_description":"TTS stopped"}'
+                mentoroid_backend_log:
+                  type: string
+                  format: binary
+                  description: |
+                    Gzip-compressed backend log file (`mentoroid_backend.log.gz`). Must start
+                    with `\x1f\x8b` magic bytes. Maximum 11 MB per file.
+                main_log:
+                  type: string
+                  format: binary
+                  description: |
+                    Gzip-compressed main process log (`main.log.gz`). Must be gzip-compressed.
+                    Maximum 11 MB per file.
+                gsi_all_data:
+                  type: string
+                  format: binary
+                  description: |
+                    Gzip-compressed GSI event stream (`gsi_all_data.jsonl.gz`). Must be
+                    gzip-compressed. Maximum 11 MB per file.
+      responses:
+        '200':
+          description: Bundle received and persisted to GCS successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - ticket_id
+                  - received_at
+                  - files_received
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  ticket_id:
+                    type: string
+                    pattern: '^diag_[0-9a-f]{12}$'
+                    description: Server-generated unique ticket identifier. Never client-supplied.
+                    example: "diag_a3f8c1b2d4e5"
+                  received_at:
+                    type: string
+                    format: date-time
+                    description: ISO 8601 UTC timestamp when the server received the bundle.
+                    example: "2026-05-07T12:00:01Z"
+                  files_received:
+                    type: array
+                    items:
+                      type: string
+                    description: |
+                      List of field names whose files were successfully received and written to GCS.
+                      Empty array if only metadata was uploaded.
+                    example: ["main_log", "gsi_all_data"]
+              example:
+                success: true
+                ticket_id: "diag_a3f8c1b2d4e5"
+                received_at: "2026-05-07T12:00:01Z"
+                files_received: ["mentoroid_backend_log", "main_log", "gsi_all_data"]
+        '400':
+          description: |
+            Validation error. Possible causes:
+            - Missing `metadata` form field
+            - `metadata` is not valid JSON
+            - `metadata` is not a JSON object
+            - `metadata.client_timestamp` is missing or not a plausible ISO 8601 timestamp
+            - `metadata.user_description` exceeds 200 characters or is not a string
+            - A log file is not gzip-compressed (missing `\x1f\x8b` magic bytes)
+            - No `steam_id` associated with the API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missing_metadata:
+                  summary: metadata field missing
+                  value:
+                    error: "Missing 'metadata' form field"
+                invalid_json:
+                  summary: metadata is not valid JSON
+                  value:
+                    error: "Field 'metadata' is not valid JSON"
+                missing_timestamp:
+                  summary: client_timestamp missing
+                  value:
+                    error: "metadata.client_timestamp is required"
+                bad_timestamp:
+                  summary: client_timestamp not ISO 8601
+                  value:
+                    error: "metadata.client_timestamp must be an ISO 8601 timestamp (e.g. 2026-05-07T12:00:00Z)"
+                description_too_long:
+                  summary: user_description too long
+                  value:
+                    error: "metadata.user_description exceeds 200 characters"
+                bad_gzip:
+                  summary: file not gzip-compressed
+                  value:
+                    error: "File 'main_log' must be gzip-compressed (missing 1f 8b magic bytes)"
+        '401':
+          description: Missing or invalid X-API-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Unauthorized"
+        '413':
+          description: |
+            Body or per-file size limit exceeded.
+            - Total request body > 32 MB → returned by Cloud Run before reaching application code
+            - Per log file > 11 MB → returned with `limit_bytes` indicating the cap
+            - `metadata` JSON field > 64 KB → returned with `limit_bytes` indicating the cap
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  limit_bytes:
+                    type: integer
+                    description: The size cap in bytes that was exceeded
+              examples:
+                file_too_large:
+                  summary: A single log file exceeded 11 MB
+                  value:
+                    error: "File 'main_log' exceeds per-file limit"
+                    limit_bytes: 11534336
+                metadata_too_large:
+                  summary: metadata JSON field exceeded 64 KB
+                  value:
+                    error: "Field 'metadata' exceeds size limit"
+                    limit_bytes: 65536
+        '503':
+          description: |
+            Rare server-side conflict — a uuid4 ticket_id collision occurred during atomic GCS
+            writes. The client should retry; a fresh `ticket_id` will be generated on the next call.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Temporary server conflict, please retry"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key for authentication. Obtained via Steam login on the Mentoroid app.
+        Format: `mk_<32 hex chars>` (Steam auth) or `key-<32 hex chars>` (legacy admin).
+        Validated against Firebase Firestore `api_keys` collection.
+
+  schemas:
+    DiagnosticsMetadata:
+      type: object
+      description: |
+        Client-supplied metadata included with a `POST /diagnostics/upload` request.
+        Only the documented fields are persisted to GCS and forwarded to Pub/Sub — any
+        unknown keys are silently dropped by the server (allowlist enforcement).
+      required:
+        - client_timestamp
+      properties:
+        client_timestamp:
+          type: string
+          format: date-time
+          description: |
+            ISO 8601 timestamp recorded on the client at the time of upload.
+            The server performs a lenient sanity check (rejects obvious garbage like `"x"` or `0`),
+            but does not parse for full correctness. The server's own `received_at` is the
+            authoritative time for support triage.
+          example: "2026-05-07T12:00:00Z"
+        app_version:
+          type: string
+          description: Flutter app version string.
+          example: "1.4.2"
+        binary_version:
+          type: string
+          description: dota2-ingame native binary version string.
+          example: "2.0.1"
+        os:
+          type: string
+          description: Operating system reported by the client.
+          example: "windows"
+        match_id:
+          oneOf:
+            - type: string
+            - type: integer
+          description: |
+            Dota 2 match ID at the time of the error. May be sent as either a string or an
+            integer — the server coerces it to a string before storage. Send `null` or omit
+            if no match was in progress.
+          example: "8565356977"
+        error_category:
+          type: string
+          enum: [tts, ocr, hero_select, pipeline, crash, other, unspecified]
+          description: |
+            High-level category of the issue being reported. Unknown values are silently dropped
+            (treated as if the field was omitted). Defaults to `"unspecified"` in notification
+            fanout if absent.
+          example: "pipeline"
+        user_description:
+          type: string
+          maxLength: 200
+          description: |
+            Optional free-text note from the user describing what went wrong. Maximum 200
+            characters — requests exceeding this limit are rejected with 400.
+          example: "TTS stopped working after 10 minutes"
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        success:
+          type: boolean
+          example: false
