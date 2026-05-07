@@ -172,13 +172,13 @@
       </div>
 
       <div class="card">
-        <h2><span class="icon">📊</span> Benchmark Data</h2>
-        <p>Access hero-specific benchmark data directly from GCS. No authentication required for frontend data fetching.</p>
+        <h2><span class="icon">📊</span> Benchmark API</h2>
+        <p>Hero/rank/role benchmark stats sliced by match duration. Backend handles the duration-bucket math and returns a flat 20-field JSON.</p>
         <ul class="features">
-          <li>Public GCS bucket access</li>
-          <li>Hero-specific benchmarks by rank</li>
-          <li>Role-based statistics (Carry, Mid, etc.)</li>
-          <li>No API call required</li>
+          <li>GET /v1/benchmark/{hero_id}/{rank}/{role}</li>
+          <li>?duration_seconds=N picks the right bucket</li>
+          <li>X-API-Key auth (same key as Stats API)</li>
+          <li>Flat response — render directly</li>
         </ul>
         <a href="./benchmarks/">View Benchmark Docs →</a>
       </div>
