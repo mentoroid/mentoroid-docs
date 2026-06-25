@@ -1,0 +1,32 @@
+# Reusable Workflow: Project Governance
+#
+# This workflow is called by other workflows to enforce project standards on Pull Requests.
+# It ensures that every PR is linked to a planning artifact (Notion Ticket or GitHub Issue).
+name: 'Governance Checks'
+on:
+  workflow_call:
+
+jobs:
+  enforce-linkage:
+    name: Enforce Notion/Issue Linkage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR Body for Notion Ticket or GitHub Issue
+        env:
+          # Assuming your Notion workspace is 'my-gaming-startup'
+          # Update this URL to match your actual workspace.
+          NOTION_URL_PATTERN: 'https://notion.so/my-gaming-startup/'
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # The regex looks for the Notion URL pattern OR a standard GitHub issue reference (e.g., #123).
+          # The grep command will exit with code 0 if a match is found, and 1 otherwise.
+          # The `-q` flag makes grep quiet (no output), and `-E` enables extended regex.
+          if grep -q -E "(${NOTION_URL_PATTERN}[a-zA-Z0-9\/-]+|#\d+)" <<< "$PR_BODY"; then
+            echo "SUCCESS: Found linked Notion Ticket or GitHub Issue."
+            exit 0
+          else
+            echo "ERROR: All PRs must link to a Notion Ticket or a GitHub Issue."
+            echo "Please add the full Notion Ticket URL or 'Fixes #<issue-number>' to the PR description."
+            exit 1
+          fi
+        shell: bash
