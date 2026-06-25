@@ -1,0 +1,48 @@
+# .claudignore - High-Performance Configuration for Dota 2 CV & Parsing
+#
+# CRITICAL: This file filters the context provided to the AI.
+# Removing entries will degrade performance and may cause failures.
+
+# --- Dota 2 Specific Assets ---
+# Replay files are large, proprietary binaries. They are useless as text context.
+*.dem
+# Valve Package Format. Large binary asset archives. Not source code.
+*.vpk
+
+# --- Computer Vision (CV) & AI Artifacts ---
+# Datasets are massive and not relevant for code generation.
+datasets/
+# Model weights are large binary files.
+*.pt
+*.pth
+*.onnx
+# Video files used for inference or creating datasets.
+*.mp4
+*.avi
+*.mov
+# Experiment tracking logs from Tensorboard/W&B. They are for visualization, not code.
+runs/
+wandb/
+
+# --- Language & Build Artifacts ---
+# These are compiled code, dependencies, or cached files. Not source code.
+# Java (Clarity Parser):
+target/
+*.class
+*.jar
+.gradle/
+# Python (AI/CV Models):
+__pycache__/
+.venv/
+venv/
+env/
+# Node.js (Web API):
+node_modules/
+
+# --- General ---
+# Environment variables, OS-specific files, and logs.
+.env
+.DS_Store
+*.log
+build/
+dist/
